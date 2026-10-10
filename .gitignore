@@ -29,3 +29,6 @@ htmlcov/
 .vscode/
 .idea/
 .DS_Store
+
+# Phase 0 recordings of real game payloads
+recordings/
