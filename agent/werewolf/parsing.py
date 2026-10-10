@@ -159,6 +159,7 @@ _RESULT_IN_OBS = re.compile(
 )
 _PARTNER_HINT = re.compile(r"partner|teammate|ally|allies|fellow|other\s+(?:were)?wolf|wolves?\s+(?:are|is)|pack", re.I)
 _EVENT_HINT = re.compile(r"kill|died|dead|eliminat|lynch|voted|investigat|executed", re.I)
+_INVESTIGATIONS_LINE = re.compile(r"\s*your\s+investigations?\s*:", re.I)
 _SEER_HINT = re.compile(r"invest|check|inspect|reveal|result|saw|seer|vision|peek", re.I)
 
 
@@ -205,7 +206,11 @@ def parse_private(state_raw: dict, observation: str, me: int, resolver: Resolver
                         partners.add(seat)
 
     if role == SEER:
-        for sentence in _sentences(observation):
+        # The platform lists results on one line ("Your investigations: Player0 is
+        # wolf, ..."); reading only that line keeps the public death list
+        # ("Player2 was villager (killed at night)") from passing as a check.
+        own_line = [line for line in observation.splitlines() if _INVESTIGATIONS_LINE.match(line)]
+        for sentence in own_line or _sentences(observation):
             if not _SEER_HINT.search(sentence) and not re.search(r"\bis\b|[:=]|->", sentence):
                 continue
             for m in _RESULT_IN_OBS.finditer(sentence):

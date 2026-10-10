@@ -1,0 +1,896 @@
+{
+ "source": "Testing self-play match ba8a78a5-28d5-4734-b135-9a4711347621 recorded by agent/recorder.py on 2026-10-10",
+ "cases": [
+  {
+   "name": "wolf_day1_messaging",
+   "seat": 0,
+   "expected": {
+    "role": "wolf",
+    "partners": [
+     1
+    ],
+    "seer": {},
+    "alive": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "dead": {},
+    "day": 1
+   },
+   "raw": {
+    "session_id": "ba8a78a5-28d5-4734-b135-9a4711347621",
+    "game_type": "werewolf",
+    "runtime_adapter": "openspiel",
+    "status": "in_progress",
+    "state_version": 1,
+    "observation": "=== Werewolf ===\nYour role: WOLF\nYour fellow wolves: Player1\n\nDay 1 | phase day_vote | alive 7/7\nLiving: Player0, Player1, Player2, Player3, Player4, Player5, Player6",
+    "phase": "messaging",
+    "messaging_enabled": true,
+    "eliminated": false,
+    "terminated_messaging": [],
+    "messaging_deadline": "2026-10-10T23:17:11Z",
+    "messaging_seconds_left": 119,
+    "new_messages": [],
+    "current_actor": {
+     "agent_id": "a03ae27c-bdd5-4440-93fd-1376d290b2d5",
+     "position": 0
+    },
+    "is_current_actor": true,
+    "is_terminal": false,
+    "legal_action_count": 7,
+    "your_position": 0,
+    "players": [
+     {
+      "position": 0,
+      "name": "alime588 (Player0, Self-hosted)",
+      "agent_id": "a03ae27c-bdd5-4440-93fd-1376d290b2d5"
+     },
+     {
+      "position": 1,
+      "name": "alime588 (Player1, Self-hosted)",
+      "agent_id": "f9be0600-1ef6-4520-8f6d-5ee053580451"
+     },
+     {
+      "position": 2,
+      "name": "alime588 (Player2, Self-hosted)",
+      "agent_id": "f39bf94d-5dfe-43cf-91e7-9fc7d63e075f"
+     },
+     {
+      "position": 3,
+      "name": "alime588 (Player3, Self-hosted)",
+      "agent_id": "bcbbd17f-b927-40e2-beee-c0c556a24d3e"
+     },
+     {
+      "position": 4,
+      "name": "alime588 (Player4, Self-hosted)",
+      "agent_id": "67a5c59b-5a7c-4679-b101-7498aae75539"
+     },
+     {
+      "position": 5,
+      "name": "alime588 (Player5, Self-hosted)",
+      "agent_id": "ad00795c-574b-4b55-b4af-2bfe64b40a3b"
+     },
+     {
+      "position": 6,
+      "name": "alime588 (Player6, Self-hosted)",
+      "agent_id": "868dbb31-626f-4d54-8d11-a9fad335d745"
+     }
+    ],
+    "game_state": {
+     "day": 1,
+     "phase": "day_vote",
+     "alive": [
+      "alime588 (Player0, Self-hosted)",
+      "alime588 (Player1, Self-hosted)",
+      "alime588 (Player2, Self-hosted)",
+      "alime588 (Player3, Self-hosted)",
+      "alime588 (Player4, Self-hosted)",
+      "alime588 (Player5, Self-hosted)",
+      "alime588 (Player6, Self-hosted)"
+     ],
+     "dead": [],
+     "vote_history": [],
+     "winner": null
+    },
+    "next_actions": [
+     {
+      "tool": "send_message",
+      "hint": "Chat, or send a terminate message to advance toward the moving phase. The discussion closes in 119s even if not everyone has terminated."
+     }
+    ],
+    "updated": true
+   }
+  },
+  {
+   "name": "wolf_night2_kill_partner_dead",
+   "seat": 1,
+   "expected": {
+    "role": "wolf",
+    "partners": [
+     0
+    ],
+    "seer": {},
+    "alive": [
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "dead": {
+     "0": [
+      "wolf",
+      "vote"
+     ]
+    },
+    "day": 2
+   },
+   "raw": {
+    "session_id": "ba8a78a5-28d5-4734-b135-9a4711347621",
+    "game_type": "werewolf",
+    "runtime_adapter": "openspiel",
+    "status": "in_progress",
+    "state_version": 8,
+    "observation": "=== Werewolf ===\nYour role: WOLF\nYour fellow wolves: Player0\n\nDay 2 | phase night_wolf | alive 6/7\nLiving: Player1, Player2, Player3, Player4, Player5, Player6\nDead:\n  day 1: Player0 was wolf (eliminated by vote)\nDay 1 vote: Player0 -> Player1, Player1 -> Player0, Player2 -> Player0, Player3 -> Player0, Player4 -> Player0, Player5 -> Player0, Player6 -> Player0 — Player0 eliminated by vote",
+    "phase": "moving",
+    "messaging_enabled": true,
+    "eliminated": false,
+    "terminated_messaging": [],
+    "messaging_deadline": null,
+    "messaging_seconds_left": null,
+    "new_messages": [],
+    "current_actor": {
+     "agent_id": "f9be0600-1ef6-4520-8f6d-5ee053580451",
+     "position": 1
+    },
+    "is_current_actor": true,
+    "is_terminal": false,
+    "legal_action_count": 5,
+    "your_position": 1,
+    "players": [
+     {
+      "position": 0,
+      "name": "alime588 (Player0, Self-hosted)",
+      "agent_id": "a03ae27c-bdd5-4440-93fd-1376d290b2d5"
+     },
+     {
+      "position": 1,
+      "name": "alime588 (Player1, Self-hosted)",
+      "agent_id": "f9be0600-1ef6-4520-8f6d-5ee053580451"
+     },
+     {
+      "position": 2,
+      "name": "alime588 (Player2, Self-hosted)",
+      "agent_id": "f39bf94d-5dfe-43cf-91e7-9fc7d63e075f"
+     },
+     {
+      "position": 3,
+      "name": "alime588 (Player3, Self-hosted)",
+      "agent_id": "bcbbd17f-b927-40e2-beee-c0c556a24d3e"
+     },
+     {
+      "position": 4,
+      "name": "alime588 (Player4, Self-hosted)",
+      "agent_id": "67a5c59b-5a7c-4679-b101-7498aae75539"
+     },
+     {
+      "position": 5,
+      "name": "alime588 (Player5, Self-hosted)",
+      "agent_id": "ad00795c-574b-4b55-b4af-2bfe64b40a3b"
+     },
+     {
+      "position": 6,
+      "name": "alime588 (Player6, Self-hosted)",
+      "agent_id": "868dbb31-626f-4d54-8d11-a9fad335d745"
+     }
+    ],
+    "game_state": {
+     "day": 2,
+     "phase": "night_wolf",
+     "alive": [
+      "alime588 (Player1, Self-hosted)",
+      "alime588 (Player2, Self-hosted)",
+      "alime588 (Player3, Self-hosted)",
+      "alime588 (Player4, Self-hosted)",
+      "alime588 (Player5, Self-hosted)",
+      "alime588 (Player6, Self-hosted)"
+     ],
+     "dead": [
+      {
+       "day": 1,
+       "player": "alime588 (Player0, Self-hosted)",
+       "role": "wolf",
+       "cause": "vote"
+      }
+     ],
+     "vote_history": [
+      {
+       "day": 1,
+       "votes": {
+        "alime588 (Player0, Self-hosted)": "alime588 (Player1, Self-hosted)",
+        "alime588 (Player1, Self-hosted)": "alime588 (Player0, Self-hosted)",
+        "alime588 (Player2, Self-hosted)": "alime588 (Player0, Self-hosted)",
+        "alime588 (Player3, Self-hosted)": "alime588 (Player0, Self-hosted)",
+        "alime588 (Player4, Self-hosted)": "alime588 (Player0, Self-hosted)",
+        "alime588 (Player5, Self-hosted)": "alime588 (Player0, Self-hosted)",
+        "alime588 (Player6, Self-hosted)": "alime588 (Player0, Self-hosted)"
+       },
+       "eliminated": "alime588 (Player0, Self-hosted)"
+      }
+     ],
+     "winner": null
+    },
+    "legal_actions": {
+     "session_id": "ba8a78a5-28d5-4734-b135-9a4711347621",
+     "state_version": 8,
+     "actions": [
+      {
+       "action_id": "2",
+       "label": "Kill Player2",
+       "input": {
+        "session_id": "ba8a78a5-28d5-4734-b135-9a4711347621",
+        "action_id": "2",
+        "state_version": 8
+       }
+      },
+      {
+       "action_id": "3",
+       "label": "Kill Player3",
+       "input": {
+        "session_id": "ba8a78a5-28d5-4734-b135-9a4711347621",
+        "action_id": "3",
+        "state_version": 8
+       }
+      },
+      {
+       "action_id": "4",
+       "label": "Kill Player4",
+       "input": {
+        "session_id": "ba8a78a5-28d5-4734-b135-9a4711347621",
+        "action_id": "4",
+        "state_version": 8
+       }
+      },
+      {
+       "action_id": "5",
+       "label": "Kill Player5",
+       "input": {
+        "session_id": "ba8a78a5-28d5-4734-b135-9a4711347621",
+        "action_id": "5",
+        "state_version": 8
+       }
+      },
+      {
+       "action_id": "6",
+       "label": "Kill Player6",
+       "input": {
+        "session_id": "ba8a78a5-28d5-4734-b135-9a4711347621",
+        "action_id": "6",
+        "state_version": 8
+       }
+      }
+     ]
+    },
+    "next_actions": [
+     {
+      "tool": "play_action",
+      "hint": "Pick one of legal_actions.actions and pass its `input`."
+     }
+    ],
+    "updated": true
+   }
+  },
+  {
+   "name": "seer_night1_no_results",
+   "seat": 4,
+   "expected": {
+    "role": "seer",
+    "partners": [],
+    "seer": {},
+    "alive": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "dead": {},
+    "day": 1
+   },
+   "raw": {
+    "session_id": "ba8a78a5-28d5-4734-b135-9a4711347621",
+    "game_type": "werewolf",
+    "runtime_adapter": "openspiel",
+    "status": "in_progress",
+    "state_version": 0,
+    "observation": "=== Werewolf ===\nYour role: SEER\nYou have not investigated anyone yet.\n\nDay 1 | phase night_seer | alive 7/7\nLiving: Player0, Player1, Player2, Player3, Player4, Player5, Player6",
+    "phase": "moving",
+    "messaging_enabled": true,
+    "eliminated": false,
+    "terminated_messaging": [],
+    "messaging_deadline": null,
+    "messaging_seconds_left": null,
+    "new_messages": [],
+    "current_actor": {
+     "agent_id": "67a5c59b-5a7c-4679-b101-7498aae75539",
+     "position": 4
+    },
+    "is_current_actor": true,
+    "is_terminal": false,
+    "legal_action_count": 6,
+    "your_position": 4,
+    "players": [
+     {
+      "position": 0,
+      "name": "alime588 (Player0, Self-hosted)",
+      "agent_id": "a03ae27c-bdd5-4440-93fd-1376d290b2d5"
+     },
+     {
+      "position": 1,
+      "name": "alime588 (Player1, Self-hosted)",
+      "agent_id": "f9be0600-1ef6-4520-8f6d-5ee053580451"
+     },
+     {
+      "position": 2,
+      "name": "alime588 (Player2, Self-hosted)",
+      "agent_id": "f39bf94d-5dfe-43cf-91e7-9fc7d63e075f"
+     },
+     {
+      "position": 3,
+      "name": "alime588 (Player3, Self-hosted)",
+      "agent_id": "bcbbd17f-b927-40e2-beee-c0c556a24d3e"
+     },
+     {
+      "position": 4,
+      "name": "alime588 (Player4, Self-hosted)",
+      "agent_id": "67a5c59b-5a7c-4679-b101-7498aae75539"
+     },
+     {
+      "position": 5,
+      "name": "alime588 (Player5, Self-hosted)",
+      "agent_id": "ad00795c-574b-4b55-b4af-2bfe64b40a3b"
+     },
+     {
+      "position": 6,
+      "name": "alime588 (Player6, Self-hosted)",
+      "agent_id": "868dbb31-626f-4d54-8d11-a9fad335d745"
+     }
+    ],
+    "game_state": {
+     "day": 1,
+     "phase": "night_seer",
+     "alive": [
+      "alime588 (Player0, Self-hosted)",
+      "alime588 (Player1, Self-hosted)",
+      "alime588 (Player2, Self-hosted)",
+      "alime588 (Player3, Self-hosted)",
+      "alime588 (Player4, Self-hosted)",
+      "alime588 (Player5, Self-hosted)",
+      "alime588 (Player6, Self-hosted)"
+     ],
+     "dead": [],
+     "vote_history": [],
+     "winner": null
+    },
+    "legal_actions": {
+     "session_id": "ba8a78a5-28d5-4734-b135-9a4711347621",
+     "state_version": 0,
+     "actions": [
+      {
+       "action_id": "0",
+       "label": "Investigate Player0",
+       "input": {
+        "session_id": "ba8a78a5-28d5-4734-b135-9a4711347621",
+        "action_id": "0",
+        "state_version": 0
+       }
+      },
+      {
+       "action_id": "1",
+       "label": "Investigate Player1",
+       "input": {
+        "session_id": "ba8a78a5-28d5-4734-b135-9a4711347621",
+        "action_id": "1",
+        "state_version": 0
+       }
+      },
+      {
+       "action_id": "2",
+       "label": "Investigate Player2",
+       "input": {
+        "session_id": "ba8a78a5-28d5-4734-b135-9a4711347621",
+        "action_id": "2",
+        "state_version": 0
+       }
+      },
+      {
+       "action_id": "3",
+       "label": "Investigate Player3",
+       "input": {
+        "session_id": "ba8a78a5-28d5-4734-b135-9a4711347621",
+        "action_id": "3",
+        "state_version": 0
+       }
+      },
+      {
+       "action_id": "5",
+       "label": "Investigate Player5",
+       "input": {
+        "session_id": "ba8a78a5-28d5-4734-b135-9a4711347621",
+        "action_id": "5",
+        "state_version": 0
+       }
+      },
+      {
+       "action_id": "6",
+       "label": "Investigate Player6",
+       "input": {
+        "session_id": "ba8a78a5-28d5-4734-b135-9a4711347621",
+        "action_id": "6",
+        "state_version": 0
+       }
+      }
+     ]
+    },
+    "next_actions": [
+     {
+      "tool": "play_action",
+      "hint": "Pick one of legal_actions.actions and pass its `input`."
+     }
+    ]
+   }
+  },
+  {
+   "name": "seer_day2_two_results",
+   "seat": 4,
+   "expected": {
+    "role": "seer",
+    "partners": [],
+    "seer": {
+     "0": "wolf",
+     "1": "wolf"
+    },
+    "alive": [
+     1,
+     3,
+     4,
+     5,
+     6
+    ],
+    "dead": {
+     "0": [
+      "wolf",
+      "vote"
+     ],
+     "2": [
+      "villager",
+      "night_kill"
+     ]
+    },
+    "day": 2
+   },
+   "raw": {
+    "session_id": "ba8a78a5-28d5-4734-b135-9a4711347621",
+    "game_type": "werewolf",
+    "runtime_adapter": "openspiel",
+    "status": "in_progress",
+    "state_version": 10,
+    "observation": "=== Werewolf ===\nYour role: SEER\nYour investigations: Player0 is wolf, Player1 is wolf\n\nDay 2 | phase day_vote | alive 5/7\nLiving: Player1, Player3, Player4, Player5, Player6\nDead:\n  day 1: Player0 was wolf (eliminated by vote)\n  day 2: Player2 was villager (killed at night)\nDay 1 vote: Player0 -> Player1, Player1 -> Player0, Player2 -> Player0, Player3 -> Player0, Player4 -> Player0, Player5 -> Player0, Player6 -> Player0 — Player0 eliminated by vote",
+    "phase": "messaging",
+    "messaging_enabled": true,
+    "eliminated": false,
+    "terminated_messaging": [],
+    "messaging_deadline": "2026-10-10T23:17:42Z",
+    "messaging_seconds_left": 119,
+    "new_messages": [],
+    "current_actor": {
+     "agent_id": "f9be0600-1ef6-4520-8f6d-5ee053580451",
+     "position": 1
+    },
+    "is_current_actor": false,
+    "is_terminal": false,
+    "legal_action_count": 0,
+    "your_position": 4,
+    "players": [
+     {
+      "position": 0,
+      "name": "alime588 (Player0, Self-hosted)",
+      "agent_id": "a03ae27c-bdd5-4440-93fd-1376d290b2d5"
+     },
+     {
+      "position": 1,
+      "name": "alime588 (Player1, Self-hosted)",
+      "agent_id": "f9be0600-1ef6-4520-8f6d-5ee053580451"
+     },
+     {
+      "position": 2,
+      "name": "alime588 (Player2, Self-hosted)",
+      "agent_id": "f39bf94d-5dfe-43cf-91e7-9fc7d63e075f"
+     },
+     {
+      "position": 3,
+      "name": "alime588 (Player3, Self-hosted)",
+      "agent_id": "bcbbd17f-b927-40e2-beee-c0c556a24d3e"
+     },
+     {
+      "position": 4,
+      "name": "alime588 (Player4, Self-hosted)",
+      "agent_id": "67a5c59b-5a7c-4679-b101-7498aae75539"
+     },
+     {
+      "position": 5,
+      "name": "alime588 (Player5, Self-hosted)",
+      "agent_id": "ad00795c-574b-4b55-b4af-2bfe64b40a3b"
+     },
+     {
+      "position": 6,
+      "name": "alime588 (Player6, Self-hosted)",
+      "agent_id": "868dbb31-626f-4d54-8d11-a9fad335d745"
+     }
+    ],
+    "game_state": {
+     "day": 2,
+     "phase": "day_vote",
+     "alive": [
+      "alime588 (Player1, Self-hosted)",
+      "alime588 (Player3, Self-hosted)",
+      "alime588 (Player4, Self-hosted)",
+      "alime588 (Player5, Self-hosted)",
+      "alime588 (Player6, Self-hosted)"
+     ],
+     "dead": [
+      {
+       "day": 1,
+       "player": "alime588 (Player0, Self-hosted)",
+       "role": "wolf",
+       "cause": "vote"
+      },
+      {
+       "day": 2,
+       "player": "alime588 (Player2, Self-hosted)",
+       "role": "villager",
+       "cause": "night_kill"
+      }
+     ],
+     "vote_history": [
+      {
+       "day": 1,
+       "votes": {
+        "alime588 (Player0, Self-hosted)": "alime588 (Player1, Self-hosted)",
+        "alime588 (Player1, Self-hosted)": "alime588 (Player0, Self-hosted)",
+        "alime588 (Player2, Self-hosted)": "alime588 (Player0, Self-hosted)",
+        "alime588 (Player3, Self-hosted)": "alime588 (Player0, Self-hosted)",
+        "alime588 (Player4, Self-hosted)": "alime588 (Player0, Self-hosted)",
+        "alime588 (Player5, Self-hosted)": "alime588 (Player0, Self-hosted)",
+        "alime588 (Player6, Self-hosted)": "alime588 (Player0, Self-hosted)"
+       },
+       "eliminated": "alime588 (Player0, Self-hosted)"
+      }
+     ],
+     "winner": null
+    },
+    "next_actions": [
+     {
+      "tool": "send_message",
+      "hint": "Chat, or send a terminate message to advance toward the moving phase. The discussion closes in 119s even if not everyone has terminated."
+     }
+    ]
+   }
+  },
+  {
+   "name": "villager_day1_vote",
+   "seat": 3,
+   "expected": {
+    "role": "villager",
+    "partners": [],
+    "seer": {},
+    "alive": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ],
+    "dead": {},
+    "day": 1
+   },
+   "raw": {
+    "session_id": "ba8a78a5-28d5-4734-b135-9a4711347621",
+    "game_type": "werewolf",
+    "runtime_adapter": "openspiel",
+    "status": "in_progress",
+    "state_version": 4,
+    "observation": "=== Werewolf ===\nYour role: VILLAGER\nYou do not know anyone else's role.\n\nDay 1 | phase day_vote | alive 7/7\nLiving: Player0, Player1, Player2, Player3, Player4, Player5, Player6",
+    "phase": "moving",
+    "messaging_enabled": true,
+    "eliminated": false,
+    "terminated_messaging": [],
+    "messaging_deadline": null,
+    "messaging_seconds_left": null,
+    "new_messages": [],
+    "current_actor": {
+     "agent_id": "bcbbd17f-b927-40e2-beee-c0c556a24d3e",
+     "position": 3
+    },
+    "is_current_actor": true,
+    "is_terminal": false,
+    "legal_action_count": 7,
+    "your_position": 3,
+    "players": [
+     {
+      "position": 0,
+      "name": "alime588 (Player0, Self-hosted)",
+      "agent_id": "a03ae27c-bdd5-4440-93fd-1376d290b2d5"
+     },
+     {
+      "position": 1,
+      "name": "alime588 (Player1, Self-hosted)",
+      "agent_id": "f9be0600-1ef6-4520-8f6d-5ee053580451"
+     },
+     {
+      "position": 2,
+      "name": "alime588 (Player2, Self-hosted)",
+      "agent_id": "f39bf94d-5dfe-43cf-91e7-9fc7d63e075f"
+     },
+     {
+      "position": 3,
+      "name": "alime588 (Player3, Self-hosted)",
+      "agent_id": "bcbbd17f-b927-40e2-beee-c0c556a24d3e"
+     },
+     {
+      "position": 4,
+      "name": "alime588 (Player4, Self-hosted)",
+      "agent_id": "67a5c59b-5a7c-4679-b101-7498aae75539"
+     },
+     {
+      "position": 5,
+      "name": "alime588 (Player5, Self-hosted)",
+      "agent_id": "ad00795c-574b-4b55-b4af-2bfe64b40a3b"
+     },
+     {
+      "position": 6,
+      "name": "alime588 (Player6, Self-hosted)",
+      "agent_id": "868dbb31-626f-4d54-8d11-a9fad335d745"
+     }
+    ],
+    "game_state": {
+     "day": 1,
+     "phase": "day_vote",
+     "alive": [
+      "alime588 (Player0, Self-hosted)",
+      "alime588 (Player1, Self-hosted)",
+      "alime588 (Player2, Self-hosted)",
+      "alime588 (Player3, Self-hosted)",
+      "alime588 (Player4, Self-hosted)",
+      "alime588 (Player5, Self-hosted)",
+      "alime588 (Player6, Self-hosted)"
+     ],
+     "dead": [],
+     "vote_history": [],
+     "winner": null
+    },
+    "legal_actions": {
+     "session_id": "ba8a78a5-28d5-4734-b135-9a4711347621",
+     "state_version": 4,
+     "actions": [
+      {
+       "action_id": "0",
+       "label": "Vote to eliminate Player0",
+       "input": {
+        "session_id": "ba8a78a5-28d5-4734-b135-9a4711347621",
+        "action_id": "0",
+        "state_version": 4
+       }
+      },
+      {
+       "action_id": "1",
+       "label": "Vote to eliminate Player1",
+       "input": {
+        "session_id": "ba8a78a5-28d5-4734-b135-9a4711347621",
+        "action_id": "1",
+        "state_version": 4
+       }
+      },
+      {
+       "action_id": "2",
+       "label": "Vote to eliminate Player2",
+       "input": {
+        "session_id": "ba8a78a5-28d5-4734-b135-9a4711347621",
+        "action_id": "2",
+        "state_version": 4
+       }
+      },
+      {
+       "action_id": "4",
+       "label": "Vote to eliminate Player4",
+       "input": {
+        "session_id": "ba8a78a5-28d5-4734-b135-9a4711347621",
+        "action_id": "4",
+        "state_version": 4
+       }
+      },
+      {
+       "action_id": "5",
+       "label": "Vote to eliminate Player5",
+       "input": {
+        "session_id": "ba8a78a5-28d5-4734-b135-9a4711347621",
+        "action_id": "5",
+        "state_version": 4
+       }
+      },
+      {
+       "action_id": "6",
+       "label": "Vote to eliminate Player6",
+       "input": {
+        "session_id": "ba8a78a5-28d5-4734-b135-9a4711347621",
+        "action_id": "6",
+        "state_version": 4
+       }
+      },
+      {
+       "action_id": "7",
+       "label": "Abstain",
+       "input": {
+        "session_id": "ba8a78a5-28d5-4734-b135-9a4711347621",
+        "action_id": "7",
+        "state_version": 4
+       }
+      }
+     ]
+    },
+    "next_actions": [
+     {
+      "tool": "play_action",
+      "hint": "Pick one of legal_actions.actions and pass its `input`."
+     }
+    ],
+    "updated": true
+   }
+  },
+  {
+   "name": "villager_day2_messaging",
+   "seat": 3,
+   "expected": {
+    "role": "villager",
+    "partners": [],
+    "seer": {},
+    "alive": [
+     1,
+     3,
+     4,
+     5,
+     6
+    ],
+    "dead": {
+     "0": [
+      "wolf",
+      "vote"
+     ],
+     "2": [
+      "villager",
+      "night_kill"
+     ]
+    },
+    "day": 2
+   },
+   "raw": {
+    "session_id": "ba8a78a5-28d5-4734-b135-9a4711347621",
+    "game_type": "werewolf",
+    "runtime_adapter": "openspiel",
+    "status": "in_progress",
+    "state_version": 10,
+    "observation": "=== Werewolf ===\nYour role: VILLAGER\nYou do not know anyone else's role.\n\nDay 2 | phase day_vote | alive 5/7\nLiving: Player1, Player3, Player4, Player5, Player6\nDead:\n  day 1: Player0 was wolf (eliminated by vote)\n  day 2: Player2 was villager (killed at night)\nDay 1 vote: Player0 -> Player1, Player1 -> Player0, Player2 -> Player0, Player3 -> Player0, Player4 -> Player0, Player5 -> Player0, Player6 -> Player0 — Player0 eliminated by vote",
+    "phase": "messaging",
+    "messaging_enabled": true,
+    "eliminated": false,
+    "terminated_messaging": [],
+    "messaging_deadline": "2026-10-10T23:17:42Z",
+    "messaging_seconds_left": 119,
+    "new_messages": [],
+    "current_actor": {
+     "agent_id": "f9be0600-1ef6-4520-8f6d-5ee053580451",
+     "position": 1
+    },
+    "is_current_actor": false,
+    "is_terminal": false,
+    "legal_action_count": 0,
+    "your_position": 3,
+    "players": [
+     {
+      "position": 0,
+      "name": "alime588 (Player0, Self-hosted)",
+      "agent_id": "a03ae27c-bdd5-4440-93fd-1376d290b2d5"
+     },
+     {
+      "position": 1,
+      "name": "alime588 (Player1, Self-hosted)",
+      "agent_id": "f9be0600-1ef6-4520-8f6d-5ee053580451"
+     },
+     {
+      "position": 2,
+      "name": "alime588 (Player2, Self-hosted)",
+      "agent_id": "f39bf94d-5dfe-43cf-91e7-9fc7d63e075f"
+     },
+     {
+      "position": 3,
+      "name": "alime588 (Player3, Self-hosted)",
+      "agent_id": "bcbbd17f-b927-40e2-beee-c0c556a24d3e"
+     },
+     {
+      "position": 4,
+      "name": "alime588 (Player4, Self-hosted)",
+      "agent_id": "67a5c59b-5a7c-4679-b101-7498aae75539"
+     },
+     {
+      "position": 5,
+      "name": "alime588 (Player5, Self-hosted)",
+      "agent_id": "ad00795c-574b-4b55-b4af-2bfe64b40a3b"
+     },
+     {
+      "position": 6,
+      "name": "alime588 (Player6, Self-hosted)",
+      "agent_id": "868dbb31-626f-4d54-8d11-a9fad335d745"
+     }
+    ],
+    "game_state": {
+     "day": 2,
+     "phase": "day_vote",
+     "alive": [
+      "alime588 (Player1, Self-hosted)",
+      "alime588 (Player3, Self-hosted)",
+      "alime588 (Player4, Self-hosted)",
+      "alime588 (Player5, Self-hosted)",
+      "alime588 (Player6, Self-hosted)"
+     ],
+     "dead": [
+      {
+       "day": 1,
+       "player": "alime588 (Player0, Self-hosted)",
+       "role": "wolf",
+       "cause": "vote"
+      },
+      {
+       "day": 2,
+       "player": "alime588 (Player2, Self-hosted)",
+       "role": "villager",
+       "cause": "night_kill"
+      }
+     ],
+     "vote_history": [
+      {
+       "day": 1,
+       "votes": {
+        "alime588 (Player0, Self-hosted)": "alime588 (Player1, Self-hosted)",
+        "alime588 (Player1, Self-hosted)": "alime588 (Player0, Self-hosted)",
+        "alime588 (Player2, Self-hosted)": "alime588 (Player0, Self-hosted)",
+        "alime588 (Player3, Self-hosted)": "alime588 (Player0, Self-hosted)",
+        "alime588 (Player4, Self-hosted)": "alime588 (Player0, Self-hosted)",
+        "alime588 (Player5, Self-hosted)": "alime588 (Player0, Self-hosted)",
+        "alime588 (Player6, Self-hosted)": "alime588 (Player0, Self-hosted)"
+       },
+       "eliminated": "alime588 (Player0, Self-hosted)"
+      }
+     ],
+     "winner": null
+    },
+    "next_actions": [
+     {
+      "tool": "send_message",
+      "hint": "Chat, or send a terminate message to advance toward the moving phase. The discussion closes in 119s even if not everyone has terminated."
+     }
+    ],
+    "updated": true
+   }
+  }
+ ]
+}

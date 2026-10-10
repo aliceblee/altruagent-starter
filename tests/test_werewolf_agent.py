@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import random
+from pathlib import Path
 
 import pytest
 
@@ -12,7 +14,7 @@ from agent.agent import Agent, create_agent
 from agent.werewolf import WerewolfAgent
 from agent.werewolf.beliefs import infer
 from agent.werewolf.chat_llm import make_polisher
-from agent.werewolf.parsing import ChatFacts, Resolver, Snapshot, parse_dead, parse_private, parse_votes, read_message
+from agent.werewolf.parsing import ChatFacts, Resolver, Snapshot, parse_dead, parse_private, parse_votes, read_message, snapshot
 from sim.werewolf_sim import BASELINES, Game, ours, run_matchup
 
 PLAYERS = [{"position": i, "name": f"Player{i}", "agent_id": f"a{i}"} for i in range(7)]
@@ -258,3 +260,24 @@ def test_full_self_play_game_finishes():
     rng = random.Random(5)
     result = Game([ours(rng) for _ in range(7)], rng).play()
     assert result.winner in ("wolves", "village")
+
+
+# -- recorded platform states ----------------------------------------------------------
+# Real states from a Testing self-play match, recorded by agent/recorder.py
+# (tests/fixtures/werewolf/recorded_states.json): the actual observation wording
+# and game_state shapes, display names included.
+
+_RECORDED = json.loads((Path(__file__).parent / "fixtures" / "werewolf" / "recorded_states.json").read_text())
+
+
+@pytest.mark.parametrize("case", _RECORDED["cases"], ids=[c["name"] for c in _RECORDED["cases"]])
+def test_snapshot_reads_recorded_platform_states(case):
+    expected = case["expected"]
+    snap, _ = snapshot(GameState.from_mcp_state(case["raw"]), case["seat"])
+    assert snap.me == case["seat"]
+    assert snap.day == expected["day"]
+    assert snap.role == expected["role"]
+    assert sorted(snap.partners) == expected["partners"]
+    assert snap.seer_results == {int(s): v for s, v in expected["seer"].items()}
+    assert sorted(snap.alive) == expected["alive"]
+    assert {s: [d.role, d.cause] for s, d in snap.dead.items()} == {int(s): v for s, v in expected["dead"].items()}
