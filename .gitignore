@@ -32,3 +32,6 @@ htmlcov/
 
 # Phase 0 recordings of real game payloads
 recordings/
+
+# Per-match decision logs (agent/decision_log.py)
+logs/
