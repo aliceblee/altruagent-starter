@@ -35,6 +35,8 @@ MAX_CHATS_PER_DAY = 4  # the server allows 5; keep one in reserve
 MAX_WORDS = 45  # the server's cap is 50
 MIN_SECONDS_TO_SPEAK = 6.0
 BANDWAGON_WEIGHT = 0.06  # per announced vote, when picking among near-equal suspects
+# Our first message of day 1, sent word for word whatever our role (never LLM-polished).
+DAY1_OPENER = "I'm a vegetarian vampire villager Eddie Cullen. I hate werewolves. Raise your hand if you're werewolf?"
 
 
 def _p(seat: int) -> str:
@@ -64,6 +66,7 @@ class WerewolfAgent:
         self._sent_today = 0
         self._done_today = False
         self._said: set[str] = set()  # topics already covered today
+        self._sent_opener = False
         self._reacted_claims: set[int] = set()
         self._reacted_accusers: set[int] = set()
         self._announced_target: int | None = None
@@ -107,6 +110,12 @@ class WerewolfAgent:
         if snap.seconds_left is not None and snap.seconds_left < MIN_SECONDS_TO_SPEAK:
             self._done_today = True
             return TERMINATE_MESSAGING
+
+        if snap.day <= 1 and not self._sent_opener:
+            self._sent_opener = True
+            self._sent_today += 1
+            self.log(f"[werewolf] P{snap.me} says: {DAY1_OPENER}")
+            return SendMessage(DAY1_OPENER)
 
         private = self._private_message(snap)
         if private is not None:

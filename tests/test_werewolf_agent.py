@@ -193,6 +193,7 @@ def test_role_and_partner_come_from_the_night_actions_when_the_observation_is_un
 def test_seer_claims_when_it_found_a_wolf_and_messages_respect_limits():
     agent = WerewolfAgent(rng=random.Random(0))
     s = state(2, "Your role: seer. Night 1: you investigated Player4: wolf.", phase="messaging")
+    agent.choose_message(s, ctx(2))  # the day-1 opener
     message = agent.choose_message(s, ctx(2))
     assert isinstance(message, SendMessage) and "Seer" in message.content and "Player4" in message.content
     assert len(message.content.split()) <= 45 and not message.recipients
@@ -201,6 +202,7 @@ def test_seer_claims_when_it_found_a_wolf_and_messages_respect_limits():
 def test_chat_ends_once_nothing_new_happens():
     agent = WerewolfAgent(rng=random.Random(0))
     s = state(6, "Your role: villager.", phase="messaging")
+    assert isinstance(agent.choose_message(s, ctx(6)), SendMessage)  # the day-1 opener
     assert isinstance(agent.choose_message(s, ctx(6)), SendMessage)
     assert agent.choose_message(s, ctx(6)) is TERMINATE_MESSAGING
     assert agent.choose_message(s, ctx(6)) is TERMINATE_MESSAGING
@@ -209,6 +211,7 @@ def test_chat_ends_once_nothing_new_happens():
 def test_wolf_whispers_to_its_partner_once_a_day():
     agent = WerewolfAgent(rng=random.Random(0))
     s = state(2, "Your role: wolf. Your fellow wolf is Player0.", phase="messaging")
+    agent.choose_message(s, ctx(2))  # the day-1 opener
     first = agent.choose_message(s, ctx(2))
     assert isinstance(first, SendMessage) and first.recipients == [0]
     second = agent.choose_message(s, ctx(2))
@@ -281,3 +284,25 @@ def test_snapshot_reads_recorded_platform_states(case):
     assert snap.seer_results == {int(s): v for s, v in expected["seer"].items()}
     assert sorted(snap.alive) == expected["alive"]
     assert {s: [d.role, d.cause] for s, d in snap.dead.items()} == {int(s): v for s, v in expected["dead"].items()}
+
+
+@pytest.mark.parametrize("observation", [
+    "Your role: villager.",
+    "Your role: seer. Night 1: you investigated Player4: wolf.",
+    "Your role: wolf. Your fellow wolf is Player0.",
+])
+def test_day1_first_message_is_the_eddie_cullen_opener_for_every_role(observation):
+    from agent.werewolf.agent import DAY1_OPENER
+
+    agent = WerewolfAgent(rng=random.Random(0), polish=lambda text, facts: "POLISHED")
+    s = state(2, observation, phase="messaging")
+    first = agent.choose_message(s, ctx(2))
+    assert isinstance(first, SendMessage) and first.content == DAY1_OPENER and not first.recipients
+    second = agent.choose_message(s, ctx(2))
+    assert not (isinstance(second, SendMessage) and second.content == DAY1_OPENER)
+
+
+def test_the_opener_is_sent_only_on_day_1():
+    agent = WerewolfAgent(rng=random.Random(0))
+    message = agent.choose_message(state(2, "Your role: villager.", phase="messaging", day=2), ctx(2))
+    assert not (isinstance(message, SendMessage) and "Eddie Cullen" in message.content)
