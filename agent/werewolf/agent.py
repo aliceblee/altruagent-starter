@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import os
 import random
+import re
 from typing import Any, Callable
 
 from altruagent import TERMINATE_MESSAGING, DecisionContext, GameState, SendMessage
@@ -48,6 +49,15 @@ class WerewolfAgent:
     counter_claim = "self"  # True: when either wolf is outed; "self": only when I am; False: never
     seer_claim_day = 2  # claim on this day at the latest, even without a wolf found
     rescue = True  # rally the table onto our top suspect when votes pile up on us
+    # Wolf play.
+    # "accuser": "I checked my accuser: WOLF"; "other": a check on someone else plus "my accuser is
+    # lying". "other" avoids the reactive-claim tell but tested no better against smart villagers
+    # (43% vs 43%) and worse against simple ones (74% vs 85%), so it's off by default.
+    counter_claim_style = "accuser"
+    spare_accusers = True  # don't kill players who accused us (their death points at us)
+    endgame_ties = True  # with 5 or fewer alive, vote to steer the tally away from a wolf
+    split_votes = True  # when a lynch is already decided, don't add our vote next to our partner's
+    distance_partner = True  # day 1: voice mild suspicion of our partner
 
     def __init__(
         self,
@@ -77,6 +87,8 @@ class WerewolfAgent:
         self._fake_seer = False
         self._fake_results: dict[int, str] = {}
         self._told_partner_day: int | None = None
+        self._planned_kill: tuple[int, int] | None = None  # (day, seat) we told our partner
+        self._fake_accused: set[int] = set()  # who we called a liar / wolf as fake seer
         # Facts learned from the legal actions offered (robust to observation wording).
         self._known_role: str | None = None
         self._known_partners: set[int] = set()
@@ -200,10 +212,13 @@ class WerewolfAgent:
         targets = [s for s in seats if s not in snap.partners]
         if not targets:
             return seats[0]
-        # A partner's private suggestion wins (ties go to the lower seat anyway).
+        # A partner's private suggestion wins (on a disagreement the server takes
+        # the lower seat's target anyway); else the target we suggested to them.
         suggestion = self._partner_suggestion(snap, targets)
         if suggestion is not None:
             return suggestion
+        if self._planned_kill and self._planned_kill[1] in targets and self._planned_kill[0] >= snap.day - 1:
+            return self._planned_kill[1]
         return self._kill_ranking(snap, targets)[0]
 
     def _kill_ranking(self, snap: Snapshot, targets: list[int]) -> list[int]:
@@ -215,8 +230,14 @@ class WerewolfAgent:
             if t in self.chat.seer_claims:
                 s += 5.0  # a live seer claimant is the biggest threat
             s += 3.0 * public.p_seer.get(t, 0.0)
-            s += 0.8 * sum(1 for spk, tgt, _ in self.chat.accusations if spk == t and tgt in wolves)
-            s += 0.6 * sum(1 for v in snap.votes if v.voter == t and v.target in wolves)
+            pressure = sum(1 for spk, tgt, _ in self.chat.accusations if spk == t and tgt in wolves)
+            pressure += sum(1 for v in snap.votes if v.voter == t and v.target in wolves)
+            if self.spare_accusers:
+                # Killing whoever was onto us is the classic tell ("the victim suspected X").
+                # Leave them alive: their accusation then looks like a grudge.
+                s -= 0.7 * pressure
+            else:
+                s += 0.7 * pressure
             # Players the village trusts carry weight in discussion; a cleared player
             # is also a confirmed villager, which makes them a strong voice.
             s += 1.0 * (1.0 - public.p_wolf.get(t, 0.0))
@@ -226,14 +247,21 @@ class WerewolfAgent:
         return sorted(targets, key=score, reverse=True)
 
     def _partner_suggestion(self, snap: Snapshot, targets: list[int]) -> int | None:
+        """The kill target named in our partner's latest private message (today or
+        last night), e.g. "kill Player4 tonight", "target 4", "let's eat P4"."""
+        for sender, text, day in reversed(self.chat.private_from):
+            if sender in snap.partners and day >= snap.day - 1:
+                seat = _named_after(text, _KILL_WORDS, targets)
+                if seat is not None:
+                    return seat
+        return None
+
+    def _partner_vote_suggestion(self, snap: Snapshot, targets: list[int]) -> int | None:
         for sender, text, day in reversed(self.chat.private_from):
             if sender in snap.partners and day == snap.day:
-                lowered = text.lower()
-                if "kill" not in lowered and "tonight" not in lowered and "target" not in lowered:
-                    continue
-                for seat in targets:
-                    if _p(seat).lower() in lowered.replace(" ", ""):
-                        return seat
+                seat = _named_after(text, _VOTE_WORDS, targets)
+                if seat is not None:
+                    return seat
         return None
 
     # -- day vote ---------------------------------------------------------------------------
@@ -263,28 +291,99 @@ class WerewolfAgent:
 
     def _wolf_vote(self, snap: Snapshot, seats: list[int]) -> int:
         partners = snap.partners & snap.alive
+        wolves = partners | {snap.me}
         intents = self.chat.intents_on(snap.day)
         alive = len(snap.alive)
+        villagers = [s for s in seats if s not in partners]
+        if self.endgame_ties and alive <= 5:
+            steer = self._steer_tally(snap, seats, wolves, villagers)
+            if steer is not None:
+                return steer
         for p in partners:
             against = sum(1 for spk, tgt in intents.items() if tgt == p and spk != snap.me)
             if against * 2 > alive - 1 and p in seats:
                 return p  # the partner is going anyway: join in and look like a villager
-        villagers = [s for s in seats if s not in partners]
         if not villagers:
             return seats[0]
-        return self._wolf_preferred_lynch(snap, villagers)
+        choice = self._wolf_preferred_lynch(snap, villagers)
+        if self.split_votes and partners:
+            choice = self._spread_vote(snap, choice, villagers)
+        return choice
+
+    def _projected_tally(self, snap: Snapshot) -> dict[int, int]:
+        """Votes announced today by living players other than me (latest intent each)."""
+        tally: dict[int, int] = {}
+        for voter, target in self.chat.intents_on(snap.day).items():
+            if voter != snap.me and voter in snap.alive and target in snap.alive:
+                tally[target] = tally.get(target, 0) + 1
+        return tally
+
+    @staticmethod
+    def _outcome(tally: dict[int, int]) -> int | None:
+        """Who a plurality vote eliminates (None on a tie or no votes)."""
+        if not tally:
+            return None
+        top = max(tally.values())
+        leaders = [t for t, c in tally.items() if c == top]
+        return leaders[0] if len(leaders) == 1 else None
+
+    def _steer_tally(self, snap: Snapshot, seats: list[int], wolves: set[int], villagers: list[int]) -> int | None:
+        """Endgame: with the announced votes in hand, cast ours so that a villager
+        goes out, else nobody (a tie, then a night kill, reaches parity), and
+        never a wolf. Returns None when the announcements don't decide it."""
+        base = self._projected_tally(snap)
+        if not base:
+            return None
+
+        def rank(choice: int) -> tuple[int, int, int]:
+            tally = dict(base)
+            if choice != ABSTAIN:
+                tally[choice] = tally.get(choice, 0) + 1
+            out = self._outcome(tally)
+            value = 2 if out is not None and out not in wolves else (1 if out is None else 0)
+            # Equal outcomes: add our vote to the leader (a safer margin), else any villager.
+            return value, int(choice == out), int(choice in villagers)
+
+        options = [s for s in seats if s not in wolves] + [ABSTAIN]
+        best = max(options, key=rank)
+        current = self._outcome(base)
+        wolf_in_danger = current is not None and current in wolves
+        if wolf_in_danger or rank(best)[0] == 2:
+            return best  # may be ABSTAIN, when that's what keeps the tally tied
+        return None
+
+    def _spread_vote(self, snap: Snapshot, choice: int, villagers: list[int]) -> int:
+        """If the announced votes already decide today's lynch without us, vote for
+        someone else so the vote history doesn't show both wolves on the same target."""
+        base = self._projected_tally(snap)
+        decided = self._outcome(base)
+        if decided != choice:
+            return choice
+        others = sorted(base.values(), reverse=True)
+        lead = base[choice] - (others[1] if len(others) > 1 else 0)
+        if lead < 2 or base[choice] * 2 <= len(snap.alive) - 1:
+            return choice  # not safely decided: our vote may matter
+        alternatives = [v for v in villagers if v != choice]
+        if not alternatives:
+            return choice
+        public = self._beliefs(snap, private=False)
+        return max(alternatives, key=lambda t: (public.p_wolf.get(t, 0.0), -t))
 
     def _wolf_preferred_lynch(self, snap: Snapshot, villagers: list[int]) -> int:
         public = self._beliefs(snap, private=False)
         intents = self.chat.intents_on(snap.day)
+
+        partner_pick = self._partner_vote_suggestion(snap, villagers)
 
         def score(t: int) -> float:
             backers = sum(1 for spk, tgt in intents.items() if tgt == t and spk != snap.me)
             s = public.p_wolf.get(t, 0.0) + 0.15 * backers
             if t in self.chat.seer_claims:
                 s += 0.6  # a real seer is the best possible lynch
-            if self._fake_seer and self._fake_results.get(t) == WOLF:
+            if self._fake_seer and (self._fake_results.get(t) == WOLF or t in self._fake_accused):
                 s += 1.0  # stay consistent with our fake claim
+            if t == partner_pick:
+                s += 0.3
             return s
 
         if self._announced_target in villagers:
@@ -381,13 +480,27 @@ class WerewolfAgent:
         if self.counter_claim and hit and not partner_claimed and not self._fake_seer:
             claimant = hit[0][0]
             self._fake_seer = True
-            self._fake_results[claimant] = WOLF
             self._said |= {"claim", "opening", "support"}  # never follow it with "Villager here"
             self._announced_target = claimant
             outed = hit[0][1]
             defend = f" {_p(outed)} is clean." if outed != snap.me else ""
+            if self.counter_claim_style == "accuser":
+                self._fake_results[claimant] = WOLF
+                return (
+                    f"I am the real Seer. I checked {_p(claimant)}: WOLF. They're faking to frame us.{defend} I'm voting {_p(claimant)}.",
+                    {"intent": "seer_claim", "vote": claimant},
+                )
+            # "I checked my accuser and they're a wolf" is the giveaway a smart table
+            # looks for, so report a check on somebody else and just call them a liar.
+            self._fake_accused.add(claimant)
+            fresh = [s for s in villagers if s != claimant] or villagers
+            check = self.rng.choice(fresh) if fresh else None
+            result = ""
+            if check is not None:
+                self._fake_results[check] = VILLAGER
+                result = f" My check was {_p(check)}: villager."
             return (
-                f"I am the real Seer. I checked {_p(claimant)}: WOLF. They're faking to frame us.{defend} I'm voting {_p(claimant)}.",
+                f"I'm the real Seer.{result} {_p(claimant)} is lying about me, and only a wolf would fake that.{defend} I'm voting {_p(claimant)}.",
                 {"intent": "seer_claim", "vote": claimant},
             )
         if partner_claimed and "support" not in self._said:
@@ -406,23 +519,40 @@ class WerewolfAgent:
             )
         if self._fake_seer and "claim" not in self._said:
             self._said |= {"claim", "opening", "support"}
-            fresh = [s for s in villagers if s not in self._fake_results]
+            fresh = [s for s in villagers if s not in self._fake_results and s not in self._fake_accused]
             if fresh:
-                check = self.rng.choice(fresh)
-                self._fake_results[check] = VILLAGER
+                # Each new "check": find the villager the table already doubts to be a wolf.
+                public = self._beliefs(snap, private=False)
+                check = max(fresh, key=lambda t: (public.p_wolf.get(t, 0.0), -t))
+                self._fake_results[check] = WOLF
             results = ", ".join(f"{_p(s)} = {'WOLF' if v == WOLF else 'villager'}" for s, v in self._fake_results.items())
-            vote = next((t for t, v in self._fake_results.items() if v == WOLF and t in snap.alive), target)
+            vote = next(
+                (t for t in list(self._fake_accused) + [t for t, v in self._fake_results.items() if v == WOLF] if t in snap.alive),
+                target,
+            )
             self._announced_target = vote
             return f"I'm the Seer. My checks: {results}. I'm voting {_p(vote)}.", {"intent": "seer_claim", "vote": vote}
         if "opening" not in self._said and target is not None:
             self._said.add("opening")
             reason = self._reason(snap, target, self._beliefs(snap, private=False))
+            aside = self._partner_aside(snap)
             if self._no_info(snap, self._beliefs(snap, private=False)):
-                return "Villager here. No info yet, so no vote from me until the Seer speaks.", {"intent": "wait"}
-            return f"Villager here. {self._vote_line(target)} {reason}".strip(), {"intent": "vote", "vote": target}
+                return f"Villager here. No info yet, so no vote from me until the Seer speaks.{aside}", {"intent": "wait"}
+            return f"Villager here. {self._vote_line(target)} {reason}{aside}".strip(), {"intent": "vote", "vote": target}
         if target is None:
             return None
         return self._react_common(snap, target)
+
+    def _partner_aside(self, snap: Snapshot) -> str:
+        """Day 1 only: a mild word of doubt about our partner, so the two of us don't
+        read as a pair. Never when the partner is already under real suspicion."""
+        living = sorted(snap.partners & snap.alive)
+        if not self.distance_partner or snap.day > 1 or not living:
+            return ""
+        partner = living[0]
+        if self._accusers_of(snap, partner) or any(r.get(partner) == WOLF for r in self.chat.claimed_results.values()):
+            return ""
+        return f" {_p(partner)} seems a little suspicious to me, though."
 
     def _no_info(self, snap: Snapshot, beliefs: Beliefs) -> bool:
         """Nothing distinguishes the other living players yet (typically day 1 before
@@ -517,16 +647,42 @@ class WerewolfAgent:
         if not partners:
             return None
         self._told_partner_day = snap.day
+        if snap.day >= 2 and not any(sender in snap.partners for sender, _, _ in self.chat.private_from):
+            return None  # the partner has never answered: save the message
         targets = [s for s in snap.living_others() if s not in snap.partners]
         if not targets:
             return None
-        kill = self._kill_ranking(snap, targets)[0]
+        partner_kill = self._partner_suggestion(snap, targets)
+        kill = partner_kill if partner_kill is not None else self._kill_ranking(snap, targets)[0]
+        self._planned_kill = (snap.day, kill)
         lynch = self._wolf_preferred_lynch(snap, targets)
         self._announced_target = lynch
-        return SendMessage(
-            f"Partner: let's both vote {_p(lynch)} today and kill {_p(kill)} tonight. Don't defend me openly.",
-            [partners[0]],
-        )
+        template = self.rng.choice(_WHISPERS)
+        return SendMessage(template.format(lynch=_p(lynch), kill=_p(kill)), [partners[0]])
+
+
+_WHISPERS = (
+    "Partner: vote {lynch} today, kill {kill} tonight. Don't defend me openly.",
+    "Wolf plan: we push {lynch} today; tonight we kill {kill}. Keep your distance from me in public.",
+    "Let's both go for {lynch} at the vote and kill {kill} tonight. I may doubt you in public, ignore it.",
+)
+_KILL_WORDS = re.compile(r"\b(?:kill|killing|target|eat|bite|tonight|night)\b", re.I)
+_VOTE_WORDS = re.compile(r"\b(?:vote|voting|lynch|push|eliminate)\b", re.I)
+_SEAT_AFTER = re.compile(r"^\W{0,3}(?:(?:player|p|seat)\s*)?(\d)\b", re.I)
+
+
+def _named_after(text: str, keywords: re.Pattern, targets: list[int]) -> int | None:
+    """The first target seat named right after one of ``keywords`` ("kill Player4",
+    "target 4", "eat P4"), or right before "tonight" ("Player4 tonight")."""
+    for m in keywords.finditer(text):
+        after = text[m.end(): m.end() + 20]
+        found = _SEAT_AFTER.match(after)
+        if found and int(found.group(1)) in targets:
+            return int(found.group(1))
+    for m in re.finditer(r"(?:player|p)\s*(\d)\s+(?:tonight|at\s+night)", text, re.I):
+        if int(m.group(1)) in targets:
+            return int(m.group(1))
+    return None
 
 
 def _infer_sub_phase(state: GameState) -> str:

@@ -20,7 +20,7 @@ The weights in `Weights` are the tuning knobs.
 |---|---|---|---|
 | Villager | – | Highest P(wolf); never abstains; breaks near-ties toward the table's announced target | Announces its vote early and gives a reason; asks the seer to claim on day 1; backs a credible lone seer claim; defends itself when accused |
 | Seer | Checks rival seer claimants first, then the likeliest wolf | A found wolf, else like a villager | Claims as soon as it finds a wolf, on day 2 at the latest, at once if someone else claims seer or if it comes under pressure |
-| Wolf | Kills seer claimants first, then likely seers, accusers and trusted villagers; follows its partner's private suggestion | The villager the *public* evidence points at, joining any momentum; votes out its partner only when the partner is doomed anyway | Plays villager; whispers the plan to its partner once a day; backs a partner's fake claim; counter-claims seer when a claimant outs it |
+| Wolf | Kills seer claimants first, then likely seers and trusted villagers, sparing players who accused it (their death would point at it); follows its partner's private suggestion | The villager the *public* evidence points at, joining any momentum; spreads its vote when the lynch is already decided; with 5 or fewer alive, steers the announced tally to a villager or a tie, never a wolf; votes out its partner only when the partner is doomed anyway | Plays villager; on day 1 voices mild doubt about its partner; whispers the plan to its partner (varied wording, stops if the partner never answers); backs a partner's fake claim; counter-claims seer when a claimant outs it |
 
 Why never abstain: with 7 players a wrong lynch on both day 1 and day 2
 hands the wolves parity, and 3 days in a row with no elimination is also a

@@ -407,3 +407,89 @@ def test_no_info_day1_opening_names_no_random_target():
     agent.choose_message(s, ctx(6))  # the day-1 opener
     opening = agent.choose_message(s, ctx(6))
     assert isinstance(opening, SendMessage) and "voting" not in opening.content
+
+
+# -- wolf play ------------------------------------------------------------------------------------
+
+WOLF_OBS = "Your role: wolf. Your fellow wolf is Player1."
+
+
+def _talk(agent, seat, observation, messages, *, day=1, calls=4, alive=None):
+    s = state(seat, observation, phase="messaging", messages=messages, day=day, alive=alive)
+    return [m for m in (agent.choose_message(s, ctx(seat)) for _ in range(calls)) if isinstance(m, SendMessage)]
+
+
+def test_outed_wolf_counterclaims_without_naming_its_accuser_as_a_wolf():
+    agent = WerewolfAgent(rng=random.Random(0))
+    agent.counter_claim_style = "other"
+    sent = _talk(agent, 0, WOLF_OBS, [(2, "I am the Seer. My checks: Player0 = WOLF. I'm voting Player0.")])
+    claim = next(m.content for m in sent if "real Seer" in m.content)
+    assert "Player2 is lying" in claim and "Player2: WOLF" not in claim and "Player2 = WOLF" not in claim
+    facts = ChatFacts()
+    read_message(facts, 2, "I am the Seer. My checks: Player0 = WOLF.", [], 1, 4, RESOLVER)
+    read_message(facts, 0, claim, [], 1, 4, RESOLVER)
+    assert 2 not in {t for t, v in facts.claimed_results.get(0, {}).items() if v == "wolf"}
+    # ...so the reactive-counterclaim penalty doesn't fire against us.
+    assert not any(facts.claimed_results.get(0, {}).get(a) == "wolf" for a in facts.named_before_claim[0])
+
+
+def test_wolf_spares_its_accuser_at_night():
+    agent = WerewolfAgent(rng=random.Random(0))
+    _talk(agent, 0, WOLF_OBS, [(3, "Player0 is suspicious, I'm voting Player0.")], calls=1)
+    night = state(0, WOLF_OBS, sub_phase="night_wolf", legal=[2, 3, 4, 5, 6], day=1)
+    assert agent.choose_action(night, ctx(0)).action_id != "3"
+
+
+def test_endgame_wolf_votes_to_tie_instead_of_losing_its_partner():
+    # 4 alive: wolves 0 and 1, villagers 2 and 3. Both villagers announce Player1.
+    agent = WerewolfAgent(rng=random.Random(0))
+    _talk(agent, 0, WOLF_OBS, [(2, "I'm voting Player1."), (3, "I'm voting Player1.")], day=3, alive=[0, 1, 2, 3], calls=1)
+    vote = state(0, WOLF_OBS, legal=[1, 2, 3, 7], day=3, alive=[0, 1, 2, 3])
+    # Player1 gets 2 (+1 from the partner's own vote elsewhere) no matter what we do, so
+    # the best we can do is make it a tie or push a villager: never join in on Player1.
+    assert agent.choose_action(vote, ctx(0)).action_id != "1"
+
+
+def test_endgame_wolf_turns_a_close_vote_onto_a_villager():
+    # 5 alive: wolves 0,1; villagers 2,3,4. Announced: 2->3, 4->3, 3->1. Our vote decides nothing
+    # against us, so take the villager lynch.
+    agent = WerewolfAgent(rng=random.Random(0))
+    _talk(agent, 0, WOLF_OBS, [(2, "I'm voting Player3."), (4, "I'm voting Player3."), (3, "I'm voting Player1.")],
+          day=2, alive=[0, 1, 2, 3, 4], calls=1)
+    vote = state(0, WOLF_OBS, legal=[1, 2, 3, 4, 7], day=2, alive=[0, 1, 2, 3, 4])
+    assert agent.choose_action(vote, ctx(0)).action_id == "3"
+
+
+def test_wolf_spreads_its_vote_when_the_lynch_is_already_decided():
+    agent = WerewolfAgent(rng=random.Random(0))
+    talk = [(2, "I'm voting Player4."), (3, "I'm voting Player4."), (5, "I'm voting Player4."), (6, "I'm voting Player4.")]
+    _talk(agent, 0, WOLF_OBS, talk, calls=1)
+    vote = state(0, WOLF_OBS, legal=[1, 2, 3, 4, 5, 6, 7])
+    assert agent.choose_action(vote, ctx(0)).action_id not in ("4", "1", "7")
+
+
+def test_wolf_voices_mild_doubt_about_its_partner_on_day_1():
+    agent = WerewolfAgent(rng=random.Random(0))
+    texts = [m.content for m in _talk(agent, 0, WOLF_OBS, []) if not m.recipients]
+    assert any("Player1 seems a little suspicious" in t for t in texts)
+
+
+@pytest.mark.parametrize("text, kill", [
+    ("Partner: vote Player3 today, kill Player5 tonight.", 5),
+    ("Wolf plan: we push Player3 today; tonight we kill Player6.", 6),
+    ("target 4", 4),
+    ("let's eat P2 tonight", 2),
+])
+def test_partner_kill_suggestion_is_read_loosely(text, kill):
+    agent = WerewolfAgent(rng=random.Random(0))
+    s = state(0, WOLF_OBS, phase="messaging", messages=[])
+    s.raw["new_messages"] = [{"seq": 1, "sender": 1, "recipients": [0], "content": text, "type": "chat"}]
+    agent.choose_message(GameState.from_mcp_state(s.raw), ctx(0))
+    night = state(0, WOLF_OBS, sub_phase="night_wolf", legal=[2, 3, 4, 5, 6])
+    assert agent.choose_action(night, ctx(0)).action_id == str(kill)
+
+
+def test_wolf_stops_whispering_to_a_silent_partner_after_day_1():
+    agent = WerewolfAgent(rng=random.Random(0))
+    day2 = _talk(agent, 0, WOLF_OBS, [], day=2)
+    assert not any(m.recipients for m in day2)
