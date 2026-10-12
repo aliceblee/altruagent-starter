@@ -43,6 +43,12 @@ class Weights:
     # Voting for a player later revealed as a villager / wolf.
     wolf_voted_villager_lynch: float = 1.25
     wolf_voted_wolf_lynch: float = 0.6
+    # Someone accusing or voting for me when I know I'm not a wolf: they're either
+    # mistaken or a wolf. Counted once per accuser per day (chat or vote).
+    # Off (1.0) by default: in the simulator any value above 1 cost the village
+    # 1-6 points, because innocent villagers who suspect each other then split
+    # their votes instead of converging. Try 1.2-1.4 against real opponents.
+    accused_me_falsely: float = 1.0
 
 
 DEFAULT_WEIGHTS = Weights()
@@ -94,6 +100,13 @@ def infer(
         targets |= {v.target for v in snap.votes if v.voter == victim.seat and v.target is not None}
         victim_accused[victim.seat] = targets
 
+    # Who has accused or voted for me, when I know I'm innocent: (accuser, day) pairs.
+    false_accusers: list[int] = []
+    if private and snap.role in (VILLAGER, SEER):
+        pairs = {(s, d) for s, t, d in chat.accusations if t == snap.me}
+        pairs |= {(v.voter, v.day) for v in snap.votes if v.target == snap.me}
+        false_accusers = [s for s, _ in pairs if s != snap.me]
+
     totals_w = {s: 0.0 for s in seats}
     totals_s = {s: 0.0 for s in seats}
     z = 0.0
@@ -135,6 +148,9 @@ def infer(
             for speaker, target, _ in chat.clears:
                 if speaker in wset and target in wset:
                     weight *= w.wolf_clears_partner
+            for accuser in false_accusers:
+                if accuser in wset:
+                    weight *= w.accused_me_falsely
             for targets in victim_accused.values():
                 for t in targets:
                     if t in wset:

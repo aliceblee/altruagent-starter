@@ -57,6 +57,15 @@ The `first_legal` table is degenerate: its wolves always kill the
 lowest-numbered villager, which leaks who the wolves are to its own
 "lowest seat" voting. It doesn't reflect real opponents.
 
+**When accused.** The agent answers each new accuser once ("I'm a villager.
+PlayerX pushing me without evidence is exactly what a wolf would do."). When
+announced votes against it reach at least 2 and come within one of half the
+other voters, it sends one *rescue* message a day rallying everyone onto its
+top suspect (`WerewolfAgent.rescue`). A seer accused by 2+ players claims. An
+optional belief weight, `Weights.accused_me_falsely`, makes a known-innocent
+agent suspect its accusers; it is off (1.0) because it cost the village 1-6
+points in the simulator.
+
 Findings from ablations (in the commit history): a seer claiming on day 1
 *without* a wolf found loses about 10 points; a wolf counter-claiming seer
 only when *it* is outed beats always and never.

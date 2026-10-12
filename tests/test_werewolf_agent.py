@@ -306,3 +306,38 @@ def test_the_opener_is_sent_only_on_day_1():
     agent = WerewolfAgent(rng=random.Random(0))
     message = agent.choose_message(state(2, "Your role: villager.", phase="messaging", day=2), ctx(2))
     assert not (isinstance(message, SendMessage) and "Eddie Cullen" in message.content)
+
+
+def test_a_false_accusation_raises_the_accusers_wolf_odds_for_a_known_villager():
+    facts = ChatFacts()
+    read_message(facts, 3, "Player6 is a wolf, I'm voting Player6.", [], 1, 6, RESOLVER)
+    from agent.werewolf.beliefs import Weights
+
+    on = Weights(accused_me_falsely=1.4)
+    p = infer(snap(), facts, weights=on).p_wolf
+    assert p[3] > p[1] and max(range(6), key=p.get) == 3
+    assert infer(snap(), facts).p_wolf[3] == pytest.approx(infer(snap(), facts).p_wolf[1], abs=0.05)  # off by default
+    # A wolf knows nothing new from it about the accuser.
+    wolf_view = infer(snap(role="wolf", partners={0}), facts, weights=on).p_wolf
+    assert wolf_view[3] == pytest.approx(wolf_view[1])
+
+
+def test_rescue_rallies_the_table_when_votes_pile_up():
+    agent = WerewolfAgent(rng=random.Random(0))
+    talk = [(1, "I'm voting Player2."), (3, "Vote Player2, suspicious."), (4, "I'm voting Player2 too.")]
+    s = state(2, "Your role: villager.", phase="messaging", messages=talk)
+    sent = [agent.choose_message(s, ctx(2)) for _ in range(3)]  # opener, opening, then the rescue
+    texts = [m.content for m in sent if isinstance(m, SendMessage)]
+    rescue = next(t for t in texts if t.startswith("Stop:"))
+    assert "3 votes on me" in rescue and "villager" in rescue and len(rescue.split()) <= 45
+    target = int(rescue.rsplit("vote Player", 1)[1].split()[0])
+    assert target != 2
+    vote = agent.choose_action(state(2, "Your role: villager.", legal=[0, 1, 3, 4, 5, 6, 7]), ctx(2))
+    assert vote.action_id == str(target)
+
+
+def test_no_rescue_for_a_single_vote():
+    agent = WerewolfAgent(rng=random.Random(0))
+    s = state(2, "Your role: villager.", phase="messaging", messages=[(1, "I'm voting Player2.")])
+    texts = [m.content for m in (agent.choose_message(s, ctx(2)) for _ in range(4)) if isinstance(m, SendMessage)]
+    assert not any(t.startswith("Stop:") for t in texts)

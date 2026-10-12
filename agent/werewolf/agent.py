@@ -47,6 +47,7 @@ class WerewolfAgent:
     # Strategy switches (also used by the simulator for ablations).
     counter_claim = "self"  # True: when either wolf is outed; "self": only when I am; False: never
     seer_claim_day = 2  # claim on this day at the latest, even without a wolf found
+    rescue = True  # rally the table onto our top suspect when votes pile up on us
 
     def __init__(
         self,
@@ -422,7 +423,40 @@ class WerewolfAgent:
             return None
         return self._react_common(snap, target)
 
+    def _votes_against_me(self, snap: Snapshot) -> list[int]:
+        """Living players whose latest announced vote today is me."""
+        return sorted(s for s, t in self.chat.intents_on(snap.day).items() if t == snap.me and s in snap.alive)
+
+    def _rescue(self, snap: Snapshot, target: int) -> tuple[str, dict] | None:
+        """Once a day, when announced votes against us approach a majority of the other
+        voters, spend a message pulling the table onto our top suspect instead."""
+        if not self.rescue or "rescue" in self._said or target == snap.me:
+            return None
+        against = self._votes_against_me(snap)
+        voters = len(snap.alive) - 1  # everyone but me
+        # At least 2 votes, and within one vote of half the other voters
+        # (7 alive: 3 votes; 5 alive: 2; 4 alive: 2).
+        if len(against) < 2 or len(against) * 2 < voters - 1:
+            return None
+        self._said.add("rescue")
+        self._reacted_accusers |= set(against)
+        beliefs = self._beliefs(snap, private=snap.role != WOLF)
+        claim = "the Seer" if (snap.role == SEER and self._claimed_seer) or self._fake_seer else "a villager"
+        reason = self._reason(snap, target, beliefs)
+        return (
+            f"Stop: {len(against)} votes on me, and I'm {claim}. A wrong lynch hands the wolves the game. "
+            f"The real case is {_p(target)}: {reason} Everyone, vote {_p(target)} with me.",
+            {"intent": "rescue", "vote": self._mark_announced(target)},
+        )
+
+    def _mark_announced(self, target: int) -> int:
+        self._announced_target = target
+        return target
+
     def _react_common(self, snap: Snapshot, target: int) -> tuple[str, dict] | None:
+        rescue = self._rescue(snap, target)
+        if rescue is not None:
+            return rescue
         accusers = [a for a in self._accusers_of(snap, snap.me) if a not in self._reacted_accusers]
         if accusers:
             self._reacted_accusers |= set(accusers)
