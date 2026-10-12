@@ -577,3 +577,18 @@ def test_a_fake_seer_always_votes_for_a_wolf_it_names():
                  if isinstance(m, SendMessage) and "My checks" in m.content)
     voted = int(claim.rsplit("voting Player", 1)[1].split(".")[0])
     assert f"Player{voted} = WOLF" in claim
+
+
+@pytest.mark.parametrize("seed", range(20))
+def test_whisper_never_plans_to_vote_and_kill_the_same_player(seed):
+    agent = WerewolfAgent(rng=random.Random(seed))
+    talk = [(5, "Partner: vote Player1 today, kill Player1 tonight.")]
+    s = state(0, "Your role: wolf. Your fellow wolf is Player5.", phase="messaging", messages=[])
+    s.raw["new_messages"] = [{"seq": 1, "sender": 5, "recipients": [0], "content": talk[0][1], "type": "chat"}]
+    whispers = [m for m in (agent.choose_message(GameState.from_mcp_state(s.raw), ctx(0)) for _ in range(3))
+                if isinstance(m, SendMessage) and m.recipients]
+    assert whispers
+    text = whispers[0].content
+    import re as _re
+    seats = [int(x) for x in _re.findall(r"Player(\d)", text)]
+    assert len(seats) == 2 and seats[0] != seats[1], text

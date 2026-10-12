@@ -697,11 +697,14 @@ class WerewolfAgent:
         targets = [s for s in snap.living_others() if s not in snap.partners]
         if not targets:
             return None
-        partner_kill = self._partner_suggestion(snap, targets)
-        kill = partner_kill if partner_kill is not None else self._kill_ranking(snap, targets)[0]
-        self._planned_kill = (snap.day, kill)
+        # Vote target first, then a different kill target: if today's vote goes our
+        # way, that player is already gone by night, so a shared target wastes the kill.
         lynch = self._wolf_preferred_lynch(snap, targets)
         self._announced_target = lynch
+        kill_targets = [t for t in targets if t != lynch] or targets
+        partner_kill = self._partner_suggestion(snap, kill_targets)
+        kill = partner_kill if partner_kill is not None else self._kill_ranking(snap, kill_targets)[0]
+        self._planned_kill = (snap.day, kill)
         template = self.rng.choice(_WHISPERS)
         return SendMessage(template.format(lynch=_p(lynch), kill=_p(kill)), [partners[0]])
 
