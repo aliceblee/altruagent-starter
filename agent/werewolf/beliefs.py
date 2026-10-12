@@ -29,6 +29,10 @@ class Weights:
     claim_by_villager: float = 0.04
     # A real seer's announced result that contradicts the world.
     false_result_by_seer: float = 0.01
+    # A "seer" who only claimed after another claimant named them a wolf, and whose
+    # result names that accuser a wolf. A real seer checks one of six players a
+    # night, so that coincidence is rare; a cornered wolf does it every time.
+    reactive_counterclaim_as_seer: float = 0.25
     # A villager fake-claiming seer and "finding" a non-wolf to be a wolf.
     false_wolf_by_villager_claimant: float = 0.3
     # A fake seer "finding" their own partner to be a wolf.
@@ -134,6 +138,9 @@ def infer(
                     for target, verdict in chat.claimed_results.get(claimant, {}).items():
                         if (verdict == WOLF) != (target in wset):
                             weight *= w.false_result_by_seer
+                    results = chat.claimed_results.get(claimant, {})
+                    if any(results.get(a) == WOLF for a in chat.named_before_claim.get(claimant, ())):
+                        weight *= w.reactive_counterclaim_as_seer
             for vote in snap.votes:
                 if vote.target is None:
                     continue

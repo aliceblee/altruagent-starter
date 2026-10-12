@@ -57,6 +57,7 @@ class Agent:
         self._decisions = decision_log or DecisionLog()
         self._context: DecisionContext | None = None
         self._chats_by_day: dict[Any, int] = {}
+        self._heard: set[int] = set()
 
     def _player(self, context: DecisionContext) -> Any:
         if self._delegate is None:
@@ -106,6 +107,11 @@ class Agent:
         self._context = context
         started = time.monotonic()
         day = _day(state)
+        for heard in state.new_messages:
+            if heard.index not in self._heard and heard.type == "chat":
+                self._heard.add(heard.index)
+                self._decisions.write(context, "heard", day=day, seq=heard.index, sender=heard.sender,
+                                      recipients=list(heard.recipients), content=heard.content)
         trimmed = False
         try:
             decision, problem, trimmed = _checked_message(method(state, context), state, self._chats_by_day.get(day, 0))

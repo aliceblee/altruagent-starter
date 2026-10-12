@@ -333,6 +333,8 @@ class WerewolfAgent:
             self._said.add("opening")
             if should_claim:
                 return self._vote_line(target), {"intent": "vote", "vote": target}
+            if self._no_info(snap, self._beliefs(snap)):
+                return "Villager here. No info yet, so no vote from me until the Seer speaks.", {"intent": "wait"}
             return (
                 f"No hard info yet. Let's all vote together so we don't split. {self._vote_line(target)}",
                 {"intent": "vote", "vote": target},
@@ -352,8 +354,8 @@ class WerewolfAgent:
             elif len(claims) >= 2:
                 self._reacted_claims |= set(claims)
                 lead = f"Villager here. {' and '.join(_p(c) for c in claims)} both claim seer, so one is a wolf."
-            elif snap.day <= 1 and not snap.votes:
-                lead = "Villager here. Seer, if you found a wolf, claim now."
+            elif self._no_info(snap, beliefs):
+                return "Villager here. No info yet, so no vote from me until the Seer speaks.", {"intent": "wait"}
             else:
                 lead = "Villager here."
             return f"{lead} {self._vote_line(target)} {reason}".strip(), {"intent": "vote", "vote": target}
@@ -380,7 +382,7 @@ class WerewolfAgent:
             claimant = hit[0][0]
             self._fake_seer = True
             self._fake_results[claimant] = WOLF
-            self._said.add("claim")
+            self._said |= {"claim", "opening", "support"}  # never follow it with "Villager here"
             self._announced_target = claimant
             outed = hit[0][1]
             defend = f" {_p(outed)} is clean." if outed != snap.me else ""
@@ -403,7 +405,7 @@ class WerewolfAgent:
                 {"intent": "vote", "vote": vote},
             )
         if self._fake_seer and "claim" not in self._said:
-            self._said.add("claim")
+            self._said |= {"claim", "opening", "support"}
             fresh = [s for s in villagers if s not in self._fake_results]
             if fresh:
                 check = self.rng.choice(fresh)
@@ -411,17 +413,22 @@ class WerewolfAgent:
             results = ", ".join(f"{_p(s)} = {'WOLF' if v == WOLF else 'villager'}" for s, v in self._fake_results.items())
             vote = next((t for t, v in self._fake_results.items() if v == WOLF and t in snap.alive), target)
             self._announced_target = vote
-            return f"Seer again. My checks: {results}. I'm voting {_p(vote)}.", {"intent": "seer_claim", "vote": vote}
+            return f"I'm the Seer. My checks: {results}. I'm voting {_p(vote)}.", {"intent": "seer_claim", "vote": vote}
         if "opening" not in self._said and target is not None:
             self._said.add("opening")
             reason = self._reason(snap, target, self._beliefs(snap, private=False))
-            lead = "Villager here."
-            if snap.day <= 1 and not self.chat.seer_claims:
-                lead = "Villager here, no info. Seer should speak up."
-            return f"{lead} {self._vote_line(target)} {reason}".strip(), {"intent": "vote", "vote": target}
+            if self._no_info(snap, self._beliefs(snap, private=False)):
+                return "Villager here. No info yet, so no vote from me until the Seer speaks.", {"intent": "wait"}
+            return f"Villager here. {self._vote_line(target)} {reason}".strip(), {"intent": "vote", "vote": target}
         if target is None:
             return None
         return self._react_common(snap, target)
+
+    def _no_info(self, snap: Snapshot, beliefs: Beliefs) -> bool:
+        """Nothing distinguishes the other living players yet (typically day 1 before
+        any claim): naming a target now would only be a coin flip that splits the table."""
+        values = [beliefs.p_wolf.get(s, 0.0) for s in snap.living_others()]
+        return not values or max(values) - min(values) < 0.02
 
     def _votes_against_me(self, snap: Snapshot) -> list[int]:
         """Living players whose latest announced vote today is me."""
@@ -475,6 +482,10 @@ class WerewolfAgent:
                 return f"{_p(c)}'s seer claim is credible. {self._vote_line(target)}", {"intent": "vote", "vote": target}
             return f"Noted {_p(c)}'s claim. {self._vote_line(target)}", {"intent": "vote", "vote": target}
         if target != self._announced_target:
+            if self._announced_target is None:
+                if self._no_info(snap, self._beliefs(snap, private=snap.role != WOLF)) and not self.chat.intents_on(snap.day):
+                    return None  # still nothing to go on; the vote itself will follow the table
+                return f"{self._vote_line(target)} {self._reason(snap, target, self._beliefs(snap, private=snap.role != WOLF))}", {"intent": "vote", "vote": target}
             return f"Changing my vote: {self._vote_line(target)}", {"intent": "vote", "vote": target}
         return None
 

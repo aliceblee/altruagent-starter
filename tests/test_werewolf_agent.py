@@ -341,3 +341,69 @@ def test_no_rescue_for_a_single_vote():
     s = state(2, "Your role: villager.", phase="messaging", messages=[(1, "I'm voting Player2.")])
     texts = [m.content for m in (agent.choose_message(s, ctx(2)) for _ in range(4)) if isinstance(m, SendMessage)]
     assert not any(t.startswith("Stop:") for t in texts)
+
+
+# -- regressions from live test matches ------------------------------------------------------
+
+# Day-1 public chat of Testing match ac3bdf0c (all seats ours except 5 and 6):
+# P2 was the seer and found P0; wolves P0/P1. Our villagers voted out the seer,
+# because "Player0's seer claim makes sense" counted as P1 claiming seer.
+AC3BDF0C_DAY1 = [
+    (2, "I am the Seer. My checks: Player0 = WOLF. I'm voting Player0."),
+    (1, "Villager here, no info. Seer should speak up. I'm voting Player2. Their play looks off to me."),
+    (0, "I am the real Seer. I checked Player2: WOLF. They're faking to frame us. I'm voting Player2."),
+    (1, "Villager here. Player0's seer claim makes sense to me. I'm voting Player2."),
+    (2, "I'm the Seer. Player1 pushing me without evidence is exactly what a wolf would do. I'm voting Player0."),
+    (0, "Villager here. I'm voting Player2. Their seer claim doesn't add up."),
+    (4, "Noted Player2's claim. I'm voting Player2."),
+]
+
+
+def test_talking_about_someones_seer_claim_is_not_a_seer_claim():
+    facts = ChatFacts()
+    for text in ("Player0's seer claim makes sense to me.", "Player4's seer claim is credible.",
+                 "I'm voting Player1. Their seer claim doesn't add up."):
+        read_message(facts, 3, text, [], 1, 6, RESOLVER)
+    assert facts.seer_claims == {}
+    for text in ("Seer here. Player2 is a wolf.", "As the seer, I checked Player2: wolf."):
+        f = ChatFacts()
+        read_message(f, 3, text, [], 1, 6, RESOLVER)
+        assert 3 in f.seer_claims and f.claimed_results[3] == {2: "wolf"}
+
+
+def test_an_accusation_is_not_a_seer_result():
+    facts = ChatFacts()
+    read_message(facts, 2, "I am the Seer. My checks: Player0 = WOLF.", [], 1, 6, RESOLVER)
+    read_message(facts, 2, "Player1 pushing me without evidence is exactly what a wolf would do.", [], 1, 6, RESOLVER)
+    assert facts.claimed_results[2] == {0: "wolf"}
+
+
+def test_ac3bdf0c_day1_villager_now_suspects_the_reactive_counterclaimer():
+    facts = ChatFacts()
+    for sender, text in AC3BDF0C_DAY1:
+        read_message(facts, sender, text, [], 1, 3, RESOLVER)
+    assert sorted(facts.seer_claims) == [0, 2]
+    assert facts.named_before_claim[0] == {2}
+    p = infer(snap(me=3), facts).p_wolf
+    assert max(p, key=p.get) == 0 and p[2] < 0.25
+
+
+def test_a_counterclaiming_wolf_never_then_says_villager_here():
+    agent = WerewolfAgent(rng=random.Random(0))
+    s = state(0, "Your role: wolf. Your fellow wolf is Player1.", phase="messaging",
+              messages=[(2, "I am the Seer. My checks: Player0 = WOLF. I'm voting Player0.")])
+    texts = []
+    for _ in range(4):
+        m = agent.choose_message(s, ctx(0))
+        if isinstance(m, SendMessage) and not m.recipients:
+            texts.append(m.content)
+    claim = next(i for i, t in enumerate(texts) if "real Seer" in t)
+    assert not any("Villager here" in t for t in texts[claim:])
+
+
+def test_no_info_day1_opening_names_no_random_target():
+    agent = WerewolfAgent(rng=random.Random(0))
+    s = state(6, "Your role: villager.", phase="messaging")
+    agent.choose_message(s, ctx(6))  # the day-1 opener
+    opening = agent.choose_message(s, ctx(6))
+    assert isinstance(opening, SendMessage) and "voting" not in opening.content

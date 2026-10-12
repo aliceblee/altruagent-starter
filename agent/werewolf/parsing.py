@@ -341,8 +341,11 @@ def snapshot(state: Any, seat_hint: int | None = None) -> tuple[Snapshot, Resolv
 
 # -- chat -------------------------------------------------------------------------------------
 
+# First-person seer claims only. "Player0's seer claim makes sense" is not a claim
+# (live games showed that wording turning every commenter into a "seer").
 _SEER_CLAIM = re.compile(
-    r"\b(?:i\s*am|i'm|im|i\s+was|as)\s+(?:the\s+|a\s+|your\s+|real\s+|actual\s+|true\s+)*seer\b|\bseer\s+(?:here|claim)\b|\bi\s+claim\s+seer\b",
+    r"\b(?:i\s*am|i'm|im|i\s+was)\s+(?:the\s+|a\s+|your\s+|real\s+|actual\s+|true\s+)*seer\b"
+    r"|(?:^|[.!?]\s*)(?:seer\s+here|as\s+(?:the\s+)?seer)\b|\bi\s+claim\s+seer\b",
     re.I,
 )
 _SEER_DENY = re.compile(r"\b(?:i\s*am|i'm|im)\s+not\s+(?:the\s+|a\s+)?seer\b", re.I)
@@ -356,6 +359,12 @@ _CLEAR_WORDS = re.compile(r"\bvillager\b|\binnocent\b|\bclean\b|\bcleared?\b|\bg
 _VOTE_BEFORE = re.compile(r"(?:vote|voting|lynch|eliminate|execute|suspect|accuse|kill)\s*(?:for|out|on|against)?\s*$", re.I)
 _RESULT_BEFORE = re.compile(r"(?:check(?:ed)?|investigat\w*|inspect\w*|look(?:ed)?\s+at|saw|peek\w*)\s*(?:on)?\s*$", re.I)
 _NEGATION = re.compile(r"\b(?:not|n't|never|no)\b", re.I)
+# A claimed result reads "Player3 is a wolf", "Player3 = WOLF", "Player3: villager".
+_RESULT_AFTER = re.compile(
+    r"^\s*(?:is|was|=|:|->|=>)\s*(?:definitely\s+|a\s+|an\s+)*(?:not\s+(?:a\s+)?)?"
+    r"(?:were)?(?:wol(?:f|ves)|villager|innocent|good|clean|evil|town)\b",
+    re.I,
+)
 
 
 @dataclass
@@ -364,6 +373,8 @@ class ChatFacts:
 
     seer_claims: dict[int, int] = field(default_factory=dict)  # claimant -> day of first claim
     claimed_results: dict[int, dict[int, str]] = field(default_factory=dict)  # claimant -> {target: role}
+    # claimant -> earlier claimants who had named them a wolf before they claimed
+    named_before_claim: dict[int, set[int]] = field(default_factory=dict)
     villager_claims: set[int] = field(default_factory=set)
     accusations: list[tuple[int, int, int]] = field(default_factory=list)  # (speaker, target, day)
     clears: list[tuple[int, int, int]] = field(default_factory=list)  # (speaker, target, day)
@@ -382,8 +393,12 @@ def read_message(facts: ChatFacts, sender: int, text: str, recipients: list[int]
     if sender == me:
         return
 
-    if _SEER_CLAIM.search(text) and not _SEER_DENY.search(text):
-        facts.seer_claims.setdefault(sender, day)
+    if _SEER_CLAIM.search(text) and not _SEER_DENY.search(text) and sender not in facts.seer_claims:
+        facts.seer_claims[sender] = day
+        # Who had already "found" this player to be a wolf before they claimed?
+        facts.named_before_claim[sender] = {
+            c for c, results in facts.claimed_results.items() if results.get(sender) == WOLF and c != sender
+        }
     if _VILLAGER_CLAIM.search(text):
         facts.villager_claims.add(sender)
 
@@ -402,7 +417,7 @@ def read_message(facts: ChatFacts, sender: int, text: str, recipients: list[int]
             if wolfish and negated and not clearish:
                 wolfish, clearish = False, True
             vote_target = bool(_VOTE_BEFORE.search(before))
-            if is_claimant and (wolfish or clearish) and (_RESULT_BEFORE.search(before) or re.search(r"\bis\b|[:=]|->|was", after)):
+            if is_claimant and (wolfish or clearish) and (_RESULT_BEFORE.search(before) or _RESULT_AFTER.search(after)):
                 verdict = WOLF if wolfish and not clearish else VILLAGER
                 facts.claimed_results.setdefault(sender, {})[seat] = verdict
             if vote_target and not _NEGATION.search(before[-15:]):
