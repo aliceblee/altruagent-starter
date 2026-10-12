@@ -36,7 +36,8 @@ MAX_CHATS_PER_DAY = 4  # the server allows 5; keep one in reserve
 MAX_WORDS = 45  # the server's cap is 50
 MIN_SECONDS_TO_SPEAK = 6.0
 BANDWAGON_WEIGHT = 0.06  # per announced vote, when picking among near-equal suspects
-# Our first message of day 1, sent word for word whatever our role (never LLM-polished).
+# Our first message of day 1, whatever our role. With an LLM configured it is rewritten
+# fresh each game (same joke, new wording); without one it is sent as is.
 DAY1_OPENER = "I'm a vegetarian vampire villager Eddie Cullen. I hate werewolves. Raise your hand if you're werewolf?"
 
 
@@ -128,8 +129,15 @@ class WerewolfAgent:
         if snap.day <= 1 and not self._sent_opener:
             self._sent_opener = True
             self._sent_today += 1
-            self.log(f"[werewolf] P{snap.me} says: {DAY1_OPENER}")
-            return SendMessage(DAY1_OPENER)
+            text = DAY1_OPENER
+            if self.polish is not None:
+                try:
+                    text = self.polish(DAY1_OPENER, {"intent": "opener"}) or DAY1_OPENER
+                except Exception as exc:  # noqa: BLE001 - never let chat polish break the game
+                    self.log(f"[werewolf] chat polish failed: {exc!r}")
+            text = " ".join(text.split()[:MAX_WORDS])
+            self.log(f"[werewolf] P{snap.me} says: {text}")
+            return SendMessage(text)
 
         private = self._private_message(snap)
         if private is not None:

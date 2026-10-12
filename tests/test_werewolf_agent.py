@@ -226,7 +226,8 @@ class FakeProvider:
         self.text = text
 
     def complete_structured(self, messages, schema_name, schema, timeout=None):
-        assert "wolf" not in messages[1]["content"].lower() or "Draft" in messages[1]["content"]
+        content = messages[1]["content"]
+        assert "wolf" not in content.lower() or content.startswith(("Draft", "Example"))
         return {"message": self.text}
 
 
@@ -294,12 +295,46 @@ def test_snapshot_reads_recorded_platform_states(case):
 def test_day1_first_message_is_the_eddie_cullen_opener_for_every_role(observation):
     from agent.werewolf.agent import DAY1_OPENER
 
-    agent = WerewolfAgent(rng=random.Random(0), polish=lambda text, facts: "POLISHED")
+    agent = WerewolfAgent(rng=random.Random(0))  # no LLM: the line as written
     s = state(2, observation, phase="messaging")
     first = agent.choose_message(s, ctx(2))
     assert isinstance(first, SendMessage) and first.content == DAY1_OPENER and not first.recipients
     second = agent.choose_message(s, ctx(2))
     assert not (isinstance(second, SendMessage) and second.content == DAY1_OPENER)
+
+
+def test_day1_opener_is_rewritten_by_the_llm_when_one_is_configured():
+    seen = []
+
+    def polish(text, facts):
+        seen.append(facts)
+        return "Vegetarian vampire villager here, fangs off. Werewolves, paws up!"
+
+    agent = WerewolfAgent(rng=random.Random(0), polish=polish)
+    first = agent.choose_message(state(2, "Your role: villager.", phase="messaging"), ctx(2))
+    assert first.content == "Vegetarian vampire villager here, fangs off. Werewolves, paws up!"
+    assert seen[0] == {"intent": "opener"}
+
+
+def test_a_failing_llm_falls_back_to_the_written_opener():
+    from agent.werewolf.agent import DAY1_OPENER
+
+    def broken(text, facts):
+        raise RuntimeError("HTTP 429")
+
+    agent = WerewolfAgent(rng=random.Random(0), polish=broken)
+    assert agent.choose_message(state(2, "Your role: villager.", phase="messaging"), ctx(2)).content == DAY1_OPENER
+
+
+@pytest.mark.parametrize("rewrite", [
+    "I'm the seer and a vegetarian vampire, wolves raise your hand!",  # invents a seer claim
+    "Vegetarian vampire here. Player3, raise your hand!",  # names a player
+])
+def test_opener_rewrites_that_break_the_rules_are_rejected(rewrite):
+    from agent.werewolf.agent import DAY1_OPENER
+
+    out = make_polisher(FakeProvider(rewrite))(DAY1_OPENER, {"intent": "opener"})
+    assert out == DAY1_OPENER
 
 
 def test_the_opener_is_sent_only_on_day_1():

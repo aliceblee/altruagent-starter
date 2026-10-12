@@ -30,6 +30,14 @@ _SYSTEM = (
     "new player names, or new roles. At most 40 words. Plain text, no quotes, no emojis."
 )
 
+_OPENER_SYSTEM = (
+    "You write the first chat message of day 1 for a player in a 7-player Werewolf game. Rewrite the "
+    "example in your own words, keeping its playful joke: the speaker is a harmless 'vegetarian vampire' "
+    "villager in the style of Eddie Cullen, hates werewolves, and teasingly asks any werewolf to raise "
+    "their hand. Vary the wording; don't copy the example. Mention no player names or numbers, and don't "
+    "claim to be the seer. At most 30 words. Plain text, no quotes, no emojis."
+)
+
 _SCHEMA = {
     "type": "object",
     "properties": {"message": {"type": "string"}},
@@ -44,9 +52,10 @@ def _players(text: str) -> set[int]:
 
 def make_polisher(provider: Any, log: Callable[[str], None] = lambda _m: None) -> Callable[[str, dict], str]:
     def polish(draft: str, facts: dict) -> str:
+        opener = facts.get("intent") == "opener"
         messages = [
-            {"role": "system", "content": _SYSTEM},
-            {"role": "user", "content": f"Draft: {draft}"},
+            {"role": "system", "content": _OPENER_SYSTEM if opener else _SYSTEM},
+            {"role": "user", "content": f"{'Example' if opener else 'Draft'}: {draft}"},
         ]
         try:
             answer = provider.complete_structured(messages, "werewolf_chat", _SCHEMA, timeout=TIMEOUT_SECONDS)
