@@ -286,6 +286,8 @@ class WerewolfAgent:
             known_wolves = [s for s in seats if snap.seer_results.get(s) == WOLF]
             if known_wolves:
                 return known_wolves[0]
+        if snap.role in (VILLAGER, None) and self._announced_target in seats and self._no_hard_info(snap):
+            return self._announced_target  # nothing better to go on: keep our word, don't split
         intents = self.chat.intents_on(snap.day)
 
         def score(t: int) -> float:
@@ -462,10 +464,12 @@ class WerewolfAgent:
             elif len(claims) >= 2:
                 self._reacted_claims |= set(claims)
                 lead = f"Villager here. {' and '.join(_p(c) for c in claims)} both claim seer, so one is a wolf."
-            elif self._no_info(snap, beliefs):
-                return "Villager here. No info yet, so no vote from me until the Seer speaks.", {"intent": "wait"}
             else:
                 lead = "Villager here."
+                if self._no_hard_info(snap):
+                    line = self._day1_line(snap)
+                    if line is not None:
+                        return line
             return f"{lead} {self._vote_line(target)} {reason}".strip(), {"intent": "vote", "vote": target}
         return self._react_common(snap, target)
 
@@ -584,6 +588,47 @@ class WerewolfAgent:
             self._claim_busted = True
             self.log(f"[werewolf] P{snap.me}: fake seer claim disproved, dropping it")
 
+    def _no_hard_info(self, snap: Snapshot) -> bool:
+        """Day 1 before anything verifiable: no seer claim, nobody dead, no votes cast.
+        (Announced votes and accusations are talk, not information.)"""
+        return snap.day <= 1 and not self.chat.seer_claims and not snap.dead and not snap.votes
+
+    def _day1_line(self, snap: Snapshot) -> tuple[str, dict] | None:
+        """A villager on day 1 with nothing to go on. A lynch beats no lynch by a wide
+        margin (about 23% vs 8% village wins with no information at all), so always
+        give the table one target: fight back against a vote on us, else join the
+        leading announced vote, else name a random player. None when there's nothing
+        new to say."""
+        if snap.day > 1:
+            return None
+        intents = {voter: t for voter, t in self.chat.intents_on(snap.day).items()
+                   if voter != snap.me and voter in snap.alive and t in snap.alive}
+        against_me = [voter for voter, t in intents.items() if t == snap.me and voter not in self._reacted_accusers]
+        if against_me and "day1_accuse" not in self._said:
+            # Once: name the first accuser; if more votes pile on, the rescue message follows.
+            self._said.add("day1_accuse")
+            accuser = against_me[0]
+            self._reacted_accusers |= set(against_me)
+            self._announced_target = accuser
+            return (f"{_p(accuser)}, you're being really suspicious, quick to point fingers already. "
+                    "I think you're the werewolf.", {"intent": "vote", "vote": accuser})
+        if self._announced_target is not None:
+            return None
+        backers: dict[int, list[int]] = {}
+        for voter, t in intents.items():  # in the order they were announced
+            if t != snap.me:
+                backers.setdefault(t, []).append(voter)
+        if backers:
+            pick = max(backers, key=lambda t: len(backers[t]))  # most backed; first announced on a tie
+            self._announced_target = pick
+            return (f"Okay, joining {_p(backers[pick][0])}'s vote on {_p(pick)} so we don't split.",
+                    {"intent": "vote", "vote": pick})
+        pick = self.rng.choice(snap.living_others())
+        self._announced_target = pick
+        return (f"No hard info yet since the seer can't share anything yet. My vampiric psychic ability tells me "
+                f"it's {_p(pick)}, something about their reasoning. We should vote to avoid a split.",
+                {"intent": "vote", "vote": pick})
+
     def _partner_aside(self, snap: Snapshot) -> str:
         """Day 1 only: a mild word of doubt about our partner, so the two of us don't
         read as a pair. Never when the partner is already under real suspicion."""
@@ -633,6 +678,10 @@ class WerewolfAgent:
         return target
 
     def _react_common(self, snap: Snapshot, target: int) -> tuple[str, dict] | None:
+        if snap.role in (VILLAGER, None) and self._no_hard_info(snap):
+            line = self._day1_line(snap)
+            if line is not None:
+                return line
         rescue = self._rescue(snap, target)
         if rescue is not None:
             return rescue

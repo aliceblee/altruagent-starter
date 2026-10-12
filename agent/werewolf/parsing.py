@@ -356,7 +356,10 @@ _VILLAGER_CLAIM = re.compile(
 )
 _WOLF_WORDS = re.compile(r"(?:were)?wol(?:f|ves)\b|\bevil\b|\bliar\b|\blying\b|\bsuspicious\b|\bsus\b|\bfake\b", re.I)
 _CLEAR_WORDS = re.compile(r"\bvillager\b|\binnocent\b|\bclean\b|\bcleared?\b|\bgood\b|\btrust(?:ed|worthy)?\b|\bnot\s+(?:a\s+)?(?:were)?wolf\b|\bsafe\b|\btown\b", re.I)
-_VOTE_BEFORE = re.compile(r"(?:vote|voting|lynch|eliminate|execute|suspect|accuse|kill)\s*(?:for|out|on|against)?\s*$", re.I)
+_VOTE_BEFORE = re.compile(
+    r"(?:(?:vote|voting|lynch|eliminate|execute|suspect|accuse|kill)\s*(?:for|out|on|against)?|tells\s+me\s+it[’']?s)\s*$",
+    re.I,
+)
 _RESULT_BEFORE = re.compile(r"(?:check(?:ed)?|investigat\w*|inspect\w*|look(?:ed)?\s+at|saw|peek\w*)\s*(?:on)?\s*$", re.I)
 _NEGATION = re.compile(r"\b(?:not|n't|never|no)\b", re.I)
 # A claimed result reads "Player3 is a wolf", "Player3 = WOLF", "Player3: villager".

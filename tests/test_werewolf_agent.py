@@ -592,3 +592,52 @@ def test_whisper_never_plans_to_vote_and_kill_the_same_player(seed):
     import re as _re
     seats = [int(x) for x in _re.findall(r"Player(\d)", text)]
     assert len(seats) == 2 and seats[0] != seats[1], text
+
+
+# -- day 1 with no information (villager) ------------------------------------------------------
+
+def _villager_day1(messages, seed=0):
+    agent = WerewolfAgent(rng=random.Random(seed))
+    s = state(6, "Your role: villager.", phase="messaging", messages=messages)
+    sent = [m for m in (agent.choose_message(s, ctx(6)) for _ in range(3)) if isinstance(m, SendMessage)]
+    vote = agent.choose_action(state(6, "Your role: villager.", legal=[0, 1, 2, 3, 4, 5, 7]), ctx(6))
+    return [m.content for m in sent[1:]], vote.action_id  # skip the opener
+
+
+def test_day1_nobody_voted_yet_names_a_psychic_pick_and_votes_it():
+    texts, vote = _villager_day1([])
+    pick = int(texts[0].split("tells me it's Player")[1][0])
+    assert texts[0] == (f"No hard info yet since the seer can't share anything yet. My vampiric psychic ability "
+                        f"tells me it's Player{pick}, something about their reasoning. We should vote to avoid a split.")
+    assert vote == str(pick) and pick != 6
+    facts = ChatFacts()
+    read_message(facts, 6, texts[0], [], 1, 0, RESOLVER)  # other agents read it as a vote
+    assert facts.intents_on(1) == {6: pick}
+
+
+def test_day1_psychic_pick_is_not_always_the_lowest_seat():
+    picks = {int(_villager_day1([], seed)[1]) for seed in range(12)}
+    assert len(picks) >= 3
+
+
+def test_day1_a_vote_on_me_gets_called_out_and_voted():
+    texts, vote = _villager_day1([(4, "I'm voting Player6.")])
+    assert texts[0] == "Player4, you're being really suspicious, quick to point fingers already. I think you're the werewolf."
+    assert vote == "4"
+
+
+def test_day1_joins_the_leading_announced_vote():
+    texts, vote = _villager_day1([(1, "I'm voting Player3."), (2, "I'm voting Player5."), (4, "Voting Player3.")])
+    assert texts[0] == "Okay, joining Player1's vote on Player3 so we don't split."
+    assert vote == "3"
+
+
+def test_day1_a_credible_seer_claim_still_overrides_the_psychic_pick():
+    agent = WerewolfAgent(rng=random.Random(0))
+    agent.choose_message(state(6, "Your role: villager.", phase="messaging"), ctx(6))
+    agent.choose_message(state(6, "Your role: villager.", phase="messaging"), ctx(6))  # psychic pick
+    seer = state(6, "Your role: villager.", phase="messaging",
+                 messages=[(2, "I am the Seer. My checks: Player4 = WOLF. I'm voting Player4.")])
+    agent.choose_message(seer, ctx(6))
+    vote = agent.choose_action(state(6, "Your role: villager.", legal=[0, 1, 2, 3, 4, 5, 7]), ctx(6))
+    assert vote.action_id == "4"
