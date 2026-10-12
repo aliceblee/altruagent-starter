@@ -14,7 +14,7 @@ from agent.agent import Agent, create_agent
 from agent.werewolf import WerewolfAgent
 from agent.werewolf.beliefs import infer
 from agent.werewolf.chat_llm import make_polisher
-from agent.werewolf.parsing import ChatFacts, Resolver, Snapshot, parse_dead, parse_private, parse_votes, read_message, snapshot
+from agent.werewolf.parsing import ChatFacts, Death, Resolver, Snapshot, parse_dead, parse_private, parse_votes, read_message, snapshot
 from sim.werewolf_sim import BASELINES, Game, ours, run_matchup
 
 PLAYERS = [{"position": i, "name": f"Player{i}", "agent_id": f"a{i}"} for i in range(7)]
@@ -476,13 +476,13 @@ def test_wolf_spares_its_accuser_at_night():
 
 
 def test_endgame_wolf_votes_to_tie_instead_of_losing_its_partner():
-    # 4 alive: wolves 0 and 1, villagers 2 and 3. Both villagers announce Player1.
+    # 5 alive: wolves 0 and 1; villagers 2, 3, 4. Announced: 2->1, 3->1, 4->2. Joining on
+    # Player1 loses the partner; a vote on Player2 makes it 2-2, a tie, so nobody goes out.
     agent = WerewolfAgent(rng=random.Random(0))
-    _talk(agent, 0, WOLF_OBS, [(2, "I'm voting Player1."), (3, "I'm voting Player1.")], day=3, alive=[0, 1, 2, 3], calls=1)
-    vote = state(0, WOLF_OBS, legal=[1, 2, 3, 7], day=3, alive=[0, 1, 2, 3])
-    # Player1 gets 2 (+1 from the partner's own vote elsewhere) no matter what we do, so
-    # the best we can do is make it a tie or push a villager: never join in on Player1.
-    assert agent.choose_action(vote, ctx(0)).action_id != "1"
+    talk = [(2, "I'm voting Player1."), (3, "I'm voting Player1."), (4, "I'm voting Player2.")]
+    _talk(agent, 0, WOLF_OBS, talk, day=3, alive=[0, 1, 2, 3, 4], calls=1)
+    vote = state(0, WOLF_OBS, legal=[1, 2, 3, 4, 7], day=3, alive=[0, 1, 2, 3, 4])
+    assert agent.choose_action(vote, ctx(0)).action_id == "2"
 
 
 def test_endgame_wolf_turns_a_close_vote_onto_a_villager():
@@ -615,9 +615,19 @@ def test_day1_nobody_voted_yet_names_a_psychic_pick_and_votes_it():
     assert facts.intents_on(1) == {6: pick}
 
 
-def test_day1_psychic_pick_is_not_always_the_lowest_seat():
-    picks = {int(_villager_day1([], seed)[1]) for seed in range(12)}
-    assert len(picks) >= 3
+def test_day1_psychic_pick_varies_by_game_but_is_shared_within_one():
+    def pick(session, seat):
+        agent = WerewolfAgent(rng=random.Random(seat))
+        c = DecisionContext(session_id=session, tournament_id=None, game_type="werewolf", agent_id="a", seat_position=seat)
+        s = state(seat, "Your role: villager.", phase="messaging")
+        agent.choose_message(s, c)
+        agent.choose_message(s, c)
+        return agent._announced_target
+
+    across_games = {pick(f"game-{i}", 6) for i in range(12)}
+    assert len(across_games) >= 3  # not always the lowest seat
+    same_game = {pick("game-x", seat) for seat in range(7)}
+    assert len(same_game) <= 2  # everyone agrees, except the picked player (who takes the next seat)
 
 
 def test_day1_a_vote_on_me_gets_called_out_and_voted():
@@ -641,3 +651,57 @@ def test_day1_a_credible_seer_claim_still_overrides_the_psychic_pick():
     agent.choose_message(seer, ctx(6))
     vote = agent.choose_action(state(6, "Your role: villager.", legal=[0, 1, 2, 3, 4, 5, 7]), ctx(6))
     assert vote.action_id == "4"
+
+
+# -- regressions from the Oct 12 Testing tournament (games eda821fb, 0eafa068, 9c774f95) -----------
+
+def test_an_announced_vote_sticks_through_small_wobbles():
+    # A seer with no wolf found announced Player0, then kept "changing" and finally voted
+    # someone it never announced. Small shifts in the odds must not move the vote.
+    agent = WerewolfAgent(rng=random.Random(0))
+    obs = "Your role: villager."
+    agent.choose_message(state(6, obs, phase="messaging"), ctx(6))
+    agent.choose_message(state(6, obs, phase="messaging"), ctx(6))
+    announced = agent._announced_target
+    noise = [(1, "Player2 seems a bit off."), (3, "I trust Player4."), (5, "Player0 is quiet.")]
+    for _ in range(3):
+        agent.choose_message(state(6, obs, phase="messaging", messages=noise), ctx(6))
+    vote = agent.choose_action(state(6, obs, legal=[0, 1, 2, 3, 4, 5, 7]), ctx(6))
+    assert vote.action_id == str(announced)
+
+
+def test_an_llm_rewrite_that_hides_the_vote_gets_it_back():
+    agent = WerewolfAgent(rng=random.Random(0), polish=lambda text, facts: "We should go after Player3 today, friends.")
+    agent._resolver = RESOLVER
+    out = agent._with_readable_vote("We should go after Player3 today, friends.", 3)
+    assert out.endswith("I'm voting Player3.")
+    assert agent._with_readable_vote("I'm convinced Player3 is a wolf.", 3) == "I'm convinced Player3 is a wolf."
+
+
+def test_day1_joins_a_push_written_without_the_word_vote():
+    texts, vote = _villager_day1([(2, "No hard info yet, but I'm convinced Player0 is a wolf based on their reasoning.")])
+    assert texts[0] == "Okay, joining Player2's vote on Player0 so we don't split."
+    assert vote == "0"
+
+
+def test_a_victims_retaliation_does_not_frame_the_accuser():
+    # Day 1: P0 picked P1 at random; P1 (the seer) hit back at P0, then died at night.
+    facts = ChatFacts()
+    read_message(facts, 0, "My psychic ability tells me it's Player1. We should vote to avoid a split.", [], 1, 6, RESOLVER)
+    read_message(facts, 1, "Player0's baseless attacks are what only wolves do. I'm voting Player0.", [], 1, 6, RESOLVER)
+    dead = {1: Death(1, "seer", "night_kill", 2)}
+    p = infer(snap(dead=dead, alive={0, 2, 3, 4, 5, 6}, day=2), facts).p_wolf
+    assert p[0] == pytest.approx(p[2], abs=0.02)
+
+
+def test_endgame_steering_never_overrides_our_vote_when_it_cannot_change_the_result():
+    # eda821fb day 2: wolf P1 (fake seer, accused P5) faced 3 votes; it voted Player3, an
+    # arbitrary villager, instead of the Player5 it had announced.
+    agent = WerewolfAgent(rng=random.Random(0))
+    obs = "Your role: wolf. Your fellow wolf is Player4."
+    alive = [1, 3, 4, 5, 6]
+    talk = [(5, "I am the Seer. My checks: Player1 = WOLF. I'm voting Player1."),
+            (3, "I'm voting Player1."), (6, "I'm voting Player1."), (4, "I'm voting Player5.")]
+    _talk(agent, 1, obs, talk, day=2, alive=alive, calls=2)
+    vote = agent.choose_action(state(1, obs, legal=[3, 4, 5, 6, 7], day=2, alive=alive), ctx(1))
+    assert vote.action_id == "5"

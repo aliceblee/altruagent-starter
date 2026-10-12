@@ -36,6 +36,10 @@ MAX_CHATS_PER_DAY = 4  # the server allows 5; keep one in reserve
 MAX_WORDS = 45  # the server's cap is 50
 MIN_SECONDS_TO_SPEAK = 6.0
 BANDWAGON_WEIGHT = 0.06  # per announced vote, when picking among near-equal suspects
+# Once we've announced a vote, keep it unless another suspect is clearly likelier. Without
+# hard info the odds wobble by a few points with every message; following them made our
+# agents flip-flop in chat and then vote for someone they never announced.
+STICKY_MARGIN = 0.12
 # Our first message of day 1, whatever our role. With an LLM configured it is rewritten
 # fresh each game (same joke, new wording); without one it is sent as is.
 DAY1_OPENER = "I'm a vegetarian vampire villager Eddie Cullen. I hate werewolves. Raise your hand if you're werewolf?"
@@ -79,6 +83,8 @@ class WerewolfAgent:
         self._done_today = False
         self._said: set[str] = set()  # topics already covered today
         self._sent_opener = False
+        self._session: str = ""
+        self._resolver: Resolver | None = None
         self._reacted_claims: set[int] = set()
         self._reacted_accusers: set[int] = set()
         self._announced_target: int | None = None
@@ -154,15 +160,30 @@ class WerewolfAgent:
                 text = self.polish(text, facts) or text
             except Exception as exc:  # noqa: BLE001 - never let chat polish break the game
                 self.log(f"[werewolf] chat polish failed: {exc!r}")
-        text = " ".join(text.split()[:MAX_WORDS])
+        text = self._with_readable_vote(text, facts.get("vote"))
         self._sent_today += 1
         self.log(f"[werewolf] P{snap.me} says: {text}")
         return SendMessage(text)
+
+    def _with_readable_vote(self, text: str, vote: Any) -> str:
+        """Keep the vote machine-readable after an LLM rewrite ("I'm convinced Player0
+        is a wolf" reads as an accusation, not a vote), so other agents can join it."""
+        words = text.split()
+        if not isinstance(vote, int) or self._resolver is None:
+            return " ".join(words[:MAX_WORDS])
+        probe = ChatFacts()
+        read_message(probe, -1, text, [], 0, -2, self._resolver)
+        if probe.intents_on(0).get(-1) == vote or (-1, vote, 0) in probe.accusations:
+            return " ".join(words[:MAX_WORDS])  # already reads as pushing that player
+        tail = f"I'm voting {_p(vote)}."
+        return " ".join(words[: MAX_WORDS - len(tail.split())] + tail.split())
 
     # -- state ------------------------------------------------------------------------------
 
     def _update(self, state: GameState, context: DecisionContext) -> tuple[Snapshot, Resolver]:
         snap, resolver = snapshot(state, context.seat_position)
+        self._session = context.session_id
+        self._resolver = resolver
         read_role = snap.role
         self._fill_from_legal_actions(snap, state)
         if not self._logged_observation:
@@ -286,7 +307,7 @@ class WerewolfAgent:
             known_wolves = [s for s in seats if snap.seer_results.get(s) == WOLF]
             if known_wolves:
                 return known_wolves[0]
-        if snap.role in (VILLAGER, None) and self._announced_target in seats and self._no_hard_info(snap):
+        if self._announced_target in seats and self._no_hard_info(snap):
             return self._announced_target  # nothing better to go on: keep our word, don't split
         intents = self.chat.intents_on(snap.day)
 
@@ -295,9 +316,9 @@ class WerewolfAgent:
             return beliefs.p_wolf.get(t, 0.0) + BANDWAGON_WEIGHT * backers
 
         best = max(score(s) for s in seats)
-        top = [s for s in seats if score(s) >= best - 1e-9]
-        if self._announced_target in top:
+        if self._announced_target in seats and best - score(self._announced_target) < STICKY_MARGIN:
             return self._announced_target
+        top = [s for s in seats if score(s) >= best - 1e-9]
         return min(top)  # deterministic, so like-minded villagers converge
 
     def _wolf_vote(self, snap: Snapshot, seats: list[int]) -> int:
@@ -306,10 +327,14 @@ class WerewolfAgent:
         intents = self.chat.intents_on(snap.day)
         alive = len(snap.alive)
         villagers = [s for s in seats if s not in partners]
+        choice = self._wolf_normal_vote(snap, seats, partners, villagers, intents, alive)
         if self.endgame_ties and alive <= 5:
-            steer = self._steer_tally(snap, seats, wolves, villagers)
+            steer = self._steer_tally(snap, seats, wolves, villagers, default=choice)
             if steer is not None:
                 return steer
+        return choice
+
+    def _wolf_normal_vote(self, snap, seats, partners, villagers, intents, alive) -> int:
         for p in partners:
             against = sum(1 for spk, tgt in intents.items() if tgt == p and spk != snap.me)
             if against * 2 > alive - 1 and p in seats:
@@ -338,7 +363,8 @@ class WerewolfAgent:
         leaders = [t for t, c in tally.items() if c == top]
         return leaders[0] if len(leaders) == 1 else None
 
-    def _steer_tally(self, snap: Snapshot, seats: list[int], wolves: set[int], villagers: list[int]) -> int | None:
+    def _steer_tally(self, snap: Snapshot, seats: list[int], wolves: set[int], villagers: list[int],
+                     default: int | None = None) -> int | None:
         """Endgame: with the announced votes in hand, cast ours so that a villager
         goes out, else nobody (a tie, then a night kill, reaches parity), and
         never a wolf. Returns None when the announcements don't decide it."""
@@ -357,11 +383,11 @@ class WerewolfAgent:
 
         options = [s for s in seats if s not in wolves] + [ABSTAIN]
         best = max(options, key=rank)
-        current = self._outcome(base)
-        wolf_in_danger = current is not None and current in wolves
-        if wolf_in_danger or rank(best)[0] == 2:
-            return best  # may be ABSTAIN, when that's what keeps the tally tied
-        return None
+        # Only override our normal vote when it actually changes the result (in testing it
+        # picked an arbitrary villager, contradicting what we'd announced, when it couldn't).
+        if default is not None and rank(best)[0] <= rank(default)[0]:
+            return None
+        return best  # may be ABSTAIN, when that's what keeps the tally tied
 
     def _spread_vote(self, snap: Snapshot, choice: int, villagers: list[int]) -> int:
         """If the announced votes already decide today's lynch without us, vote for
@@ -443,8 +469,10 @@ class WerewolfAgent:
             self._said.add("opening")
             if should_claim:
                 return self._vote_line(target), {"intent": "vote", "vote": target}
-            if self._no_info(snap, self._beliefs(snap)):
-                return "Villager here. No info yet, so no vote from me until the Seer speaks.", {"intent": "wait"}
+            if self._uses_day1_lines(snap):
+                line = self._day1_line(snap)
+                if line is not None:
+                    return line
             return (
                 f"No hard info yet. Let's all vote together so we don't split. {self._vote_line(target)}",
                 {"intent": "vote", "vote": target},
@@ -588,6 +616,14 @@ class WerewolfAgent:
             self._claim_busted = True
             self.log(f"[werewolf] P{snap.me}: fake seer claim disproved, dropping it")
 
+    def _uses_day1_lines(self, snap: Snapshot) -> bool:
+        """Villagers, and a seer that has found no wolf (it isn't claiming yet), on day 1."""
+        if not self._no_hard_info(snap):
+            return False
+        if snap.role == SEER:
+            return not self._claimed_seer and not any(v == WOLF for v in snap.seer_results.values())
+        return snap.role in (VILLAGER, None)
+
     def _no_hard_info(self, snap: Snapshot) -> bool:
         """Day 1 before anything verifiable: no seer claim, nobody dead, no votes cast.
         (Announced votes and accusations are talk, not information.)"""
@@ -601,8 +637,14 @@ class WerewolfAgent:
         new to say."""
         if snap.day > 1:
             return None
-        intents = {voter: t for voter, t in self.chat.intents_on(snap.day).items()
-                   if voter != snap.me and voter in snap.alive and t in snap.alive}
+        # Announced votes, plus plain accusations ("I'm convinced Player0 is a wolf"): an
+        # LLM-written message often pushes a target without the word "vote". Latest per speaker.
+        intents: dict[int, int] = {}
+        for speaker, t, day in self.chat.accusations:
+            if day == snap.day and speaker != snap.me and speaker in snap.alive and t in snap.alive:
+                intents.pop(speaker, None)
+                intents[speaker] = t
+        cleared = {t for t, v in snap.seer_results.items() if v != WOLF}
         against_me = [voter for voter, t in intents.items() if t == snap.me and voter not in self._reacted_accusers]
         if against_me and "day1_accuse" not in self._said:
             # Once: name the first accuser; if more votes pile on, the rescue message follows.
@@ -616,18 +658,30 @@ class WerewolfAgent:
             return None
         backers: dict[int, list[int]] = {}
         for voter, t in intents.items():  # in the order they were announced
-            if t != snap.me:
+            if t != snap.me and t not in cleared:
                 backers.setdefault(t, []).append(voter)
         if backers:
             pick = max(backers, key=lambda t: len(backers[t]))  # most backed; first announced on a tie
             self._announced_target = pick
             return (f"Okay, joining {_p(backers[pick][0])}'s vote on {_p(pick)} so we don't split.",
                     {"intent": "vote", "vote": pick})
-        pick = self.rng.choice(snap.living_others())
+        pick = self._psychic_pick(snap, cleared)
         self._announced_target = pick
         return (f"No hard info yet since the seer can't share anything yet. My vampiric psychic ability tells me "
                 f"it's {_p(pick)}, something about their reasoning. We should vote to avoid a split.",
                 {"intent": "vote", "vote": pick})
+
+    def _psychic_pick(self, snap: Snapshot, cleared: set[int]) -> int:
+        """A random player, but the same one for every agent of ours in this game and day
+        (seeded by the session), so our villagers don't scatter their picks while the
+        wolves vote as a pair. If the shared pick is us, take the next seat."""
+        living = sorted(snap.alive)
+        start = random.Random(f"{self._session}:{snap.day}").randrange(len(living))
+        for k in range(len(living)):
+            seat = living[(start + k) % len(living)]
+            if seat != snap.me and seat not in cleared:
+                return seat
+        return self.rng.choice(snap.living_others())
 
     def _partner_aside(self, snap: Snapshot) -> str:
         """Day 1 only: a mild word of doubt about our partner, so the two of us don't
@@ -678,7 +732,7 @@ class WerewolfAgent:
         return target
 
     def _react_common(self, snap: Snapshot, target: int) -> tuple[str, dict] | None:
-        if snap.role in (VILLAGER, None) and self._no_hard_info(snap):
+        if self._uses_day1_lines(snap):
             line = self._day1_line(snap)
             if line is not None:
                 return line

@@ -100,8 +100,15 @@ def infer(
 
     victim_accused: dict[int, set[int]] = {}
     for victim in night_victims:
-        targets = {t for s, t, _ in chat.accusations if s == victim.seat}
-        targets |= {v.target for v in snap.votes if v.voter == victim.seat and v.target is not None}
+        # Only accusations the victim started: hitting back at someone who had already
+        # accused them is retaliation, not a read (in testing a seer killed after answering
+        # a random day-1 pick framed that innocent picker).
+        targets: set[int] = set()
+        for i, (s, t, day) in enumerate(chat.accusations):
+            if s == victim.seat and not any(a == t and b == victim.seat and d == day for a, b, d in chat.accusations[:i]):
+                targets.add(t)
+        targets |= {v.target for v in snap.votes if v.voter == victim.seat and v.target is not None
+                    and not any(a == v.target and b == victim.seat and d == v.day for a, b, d in chat.accusations)}
         victim_accused[victim.seat] = targets
 
     # Who has accused or voted for me, when I know I'm innocent: (accuser, day) pairs.
