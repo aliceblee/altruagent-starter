@@ -493,3 +493,52 @@ def test_wolf_stops_whispering_to_a_silent_partner_after_day_1():
     agent = WerewolfAgent(rng=random.Random(0))
     day2 = _talk(agent, 0, WOLF_OBS, [], day=2)
     assert not any(m.recipients for m in day2)
+
+
+# Testing match e1b77dea: wolf P3 fake-claimed "Player0 = WOLF" on day 1, P0 was voted out
+# and revealed as the real seer, and on day 2 P3 still said "Seer again. My checks:
+# Player0 = WOLF, Player1 = villager. I'm voting Player4." Its partner P2 kept backing it.
+E1B77DEA_DEAD = [{"player": "Player0", "role": "seer", "cause": "vote", "day": 1},
+                 {"player": "Player6", "role": "villager", "cause": "night_kill", "day": 2}]
+
+
+def _e1b77dea_wolf(seat: int, partner: int) -> WerewolfAgent:
+    agent = WerewolfAgent(rng=random.Random(0))
+    obs = f"Your role: wolf. Your fellow wolf is Player{partner}."
+    day1 = [(0, "I am the Seer. My checks: Player3 = WOLF. I'm voting Player3.")]
+    if seat == 2:
+        day1.append((3, "I am the real Seer. I checked Player0: WOLF. I'm voting Player0."))
+    _talk(agent, seat, obs, day1)
+    return agent
+
+
+def test_a_disproved_fake_seer_drops_the_act():
+    agent = _e1b77dea_wolf(3, 2)
+    assert agent._fake_seer
+    s = state(3, "Your role: wolf. Your fellow wolf is Player2.", phase="messaging", day=2,
+              alive=[1, 2, 3, 4, 5], dead=E1B77DEA_DEAD)
+    texts = [m.content for m in (agent.choose_message(s, ctx(3)) for _ in range(4))
+             if isinstance(m, SendMessage) and not m.recipients]
+    assert texts and not any("Seer" in t or "Player0" in t or "Villager here" in t for t in texts)
+
+
+def test_partner_stops_backing_a_disproved_seer_claim():
+    agent = _e1b77dea_wolf(2, 3)
+    s = state(2, "Your role: wolf. Your fellow wolf is Player3.", phase="messaging", day=2,
+              alive=[1, 2, 3, 4, 5], dead=E1B77DEA_DEAD)
+    texts = [m.content for m in (agent.choose_message(s, ctx(2)) for _ in range(4))
+             if isinstance(m, SendMessage) and not m.recipients]
+    assert not any("seer claim makes sense" in t for t in texts)
+
+
+def test_a_fake_seer_always_votes_for_a_wolf_it_names():
+    # Our claim still stands (nothing revealed contradicts it): whoever we vote for on
+    # day 2 must be one of the players we call a wolf in the same message.
+    agent = WerewolfAgent(rng=random.Random(0))
+    _talk(agent, 0, WOLF_OBS, [(2, "I am the Seer. My checks: Player0 = WOLF.")])
+    s = state(0, WOLF_OBS, phase="messaging", day=2, alive=[0, 1, 2, 3, 4, 5],
+              dead=[{"player": "Player6", "role": "villager", "cause": "night_kill", "day": 2}])
+    claim = next(m.content for m in (agent.choose_message(s, ctx(0)) for _ in range(4))
+                 if isinstance(m, SendMessage) and "My checks" in m.content)
+    voted = int(claim.rsplit("voting Player", 1)[1].split(".")[0])
+    assert f"Player{voted} = WOLF" in claim

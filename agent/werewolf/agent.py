@@ -89,6 +89,7 @@ class WerewolfAgent:
         self._told_partner_day: int | None = None
         self._planned_kill: tuple[int, int] | None = None  # (day, seat) we told our partner
         self._fake_accused: set[int] = set()  # who we called a liar / wolf as fake seer
+        self._claim_busted = False  # our fake seer claim was disproved by a revealed role
         # Facts learned from the legal actions offered (robust to observation wording).
         self._known_role: str | None = None
         self._known_partners: set[int] = set()
@@ -461,10 +462,14 @@ class WerewolfAgent:
         return self._react_common(snap, target)
 
     def _plan_wolf(self, snap: Snapshot) -> tuple[str, dict] | None:
+        self._update_fake_claim(snap)
         wolves = snap.partners | {snap.me}
         living_partners = snap.partners & snap.alive
         rivals = [c for c in self.chat.seer_claims if c in snap.alive and c not in wolves]
-        partner_claimed = any(p in self.chat.seer_claims for p in living_partners)
+        partner_claimed = any(
+            p in self.chat.seer_claims and not self._claim_disproved(snap, p, self.chat.claimed_results.get(p, {}))
+            for p in living_partners
+        )
         hit = [
             (c, t)
             for c in rivals
@@ -477,7 +482,7 @@ class WerewolfAgent:
         # Counter-claim when a seer claimant outs one of us.
         if self.counter_claim == "self":
             hit = [(c, t) for c, t in hit if t == snap.me]
-        if self.counter_claim and hit and not partner_claimed and not self._fake_seer:
+        if self.counter_claim and hit and not partner_claimed and not self._fake_seer and not self._claim_busted:
             claimant = hit[0][0]
             self._fake_seer = True
             self._said |= {"claim", "opening", "support"}  # never follow it with "Villager here"
@@ -505,7 +510,8 @@ class WerewolfAgent:
             )
         if partner_claimed and "support" not in self._said:
             self._said.add("support")
-            partner = next(p for p in living_partners if p in self.chat.seer_claims)
+            partner = next(p for p in living_partners if p in self.chat.seer_claims
+                           and not self._claim_disproved(snap, p, self.chat.claimed_results.get(p, {})))
             vote = next(
                 (t for t, v in self.chat.claimed_results.get(partner, {}).items() if v == WOLF and t in snap.alive),
                 target,
@@ -525,13 +531,22 @@ class WerewolfAgent:
                 public = self._beliefs(snap, private=False)
                 check = max(fresh, key=lambda t: (public.p_wolf.get(t, 0.0), -t))
                 self._fake_results[check] = WOLF
-            results = ", ".join(f"{_p(s)} = {'WOLF' if v == WOLF else 'villager'}" for s, v in self._fake_results.items())
             vote = next(
                 (t for t in list(self._fake_accused) + [t for t, v in self._fake_results.items() if v == WOLF] if t in snap.alive),
-                target,
+                None,
             )
+            if vote is None and target is not None:
+                self._fake_results[target] = WOLF  # the claim and the vote must agree
+                vote = target
+            if vote is None:
+                return None
+            results = ", ".join(f"{_p(s)} = {'WOLF' if v == WOLF else 'villager'}" for s, v in self._fake_results.items())
             self._announced_target = vote
             return f"I'm the Seer. My checks: {results}. I'm voting {_p(vote)}.", {"intent": "seer_claim", "vote": vote}
+        if "opening" not in self._said and target is not None and self._claim_busted:
+            self._said.add("opening")
+            reason = self._reason(snap, target, self._beliefs(snap, private=False))
+            return f"{self._vote_line(target)} {reason}".strip(), {"intent": "vote", "vote": target}
         if "opening" not in self._said and target is not None:
             self._said.add("opening")
             reason = self._reason(snap, target, self._beliefs(snap, private=False))
@@ -542,6 +557,24 @@ class WerewolfAgent:
         if target is None:
             return None
         return self._react_common(snap, target)
+
+    def _claim_disproved(self, snap: Snapshot, claimant: int, results: dict[int, str]) -> bool:
+        """A seer claim the revealed roles have proved false: another player died as
+        the seer, or a "wolf" result died a non-wolf (or a "villager" result a wolf)."""
+        for seat, death in snap.dead.items():
+            if death.role == SEER and seat != claimant:
+                return True
+            said = results.get(seat)
+            if said and death.role and (said == WOLF) != (death.role == WOLF):
+                return True
+        return False
+
+    def _update_fake_claim(self, snap: Snapshot) -> None:
+        if self._fake_seer and self._claim_disproved(snap, snap.me, {**self._fake_results, **{t: WOLF for t in self._fake_accused}}):
+            # Proven a liar: stop the act. Repeating the busted results only reminds the table.
+            self._fake_seer = False
+            self._claim_busted = True
+            self.log(f"[werewolf] P{snap.me}: fake seer claim disproved, dropping it")
 
     def _partner_aside(self, snap: Snapshot) -> str:
         """Day 1 only: a mild word of doubt about our partner, so the two of us don't
@@ -579,9 +612,10 @@ class WerewolfAgent:
         self._reacted_accusers |= set(against)
         beliefs = self._beliefs(snap, private=snap.role != WOLF)
         claim = "the Seer" if (snap.role == SEER and self._claimed_seer) or self._fake_seer else "a villager"
+        who_i_am = "" if self._claim_busted else f", and I'm {claim}"
         reason = self._reason(snap, target, beliefs)
         return (
-            f"Stop: {len(against)} votes on me, and I'm {claim}. A wrong lynch hands the wolves the game. "
+            f"Stop: {len(against)} votes on me{who_i_am}. A wrong lynch hands the wolves the game. "
             f"The real case is {_p(target)}: {reason} Everyone, vote {_p(target)} with me.",
             {"intent": "rescue", "vote": self._mark_announced(target)},
         )
@@ -599,6 +633,9 @@ class WerewolfAgent:
             self._reacted_accusers |= set(accusers)
             who = " and ".join(_p(a) for a in accusers)
             claim = "the Seer" if (snap.role == SEER and self._claimed_seer) or self._fake_seer else "a villager"
+            if self._claim_busted:
+                return (f"{who} pushing me is exactly what a wolf would do. {self._vote_line(target)}",
+                        {"intent": "defend", "vote": target})
             return (
                 f"I'm {claim}. {who} pushing me without evidence is exactly what a wolf would do. {self._vote_line(target)}",
                 {"intent": "defend", "vote": target},
