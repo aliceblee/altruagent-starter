@@ -751,3 +751,19 @@ def test_wolf_never_calls_out_unison():
               dead=[{"player": "Player6", "role": "villager", "cause": "night_kill", "day": 2}])
     texts = [m.content for m in (agent.choose_message(s, ctx(0)) for _ in range(4)) if isinstance(m, SendMessage)]
     assert not any("in unison" in t for t in texts)
+
+
+def test_wolf_does_not_echo_its_partners_push_in_unison():
+    # Partner Player1 just pushed Player3; we want Player3 too. Our announcement must read as
+    # following (which the unison detector ignores), not a second unprompted push.
+    agent = WerewolfAgent(rng=random.Random(0))
+    agent.distance_partner = False
+    s = state(0, WOLF_OBS, phase="messaging", day=2, alive=[0, 1, 2, 3, 4, 5],
+              dead=[{"player": "Player6", "role": "villager", "cause": "night_kill", "day": 2}],
+              messages=[(1, "I'm voting Player3, they seem off.")])
+    agent._wolf_preferred_lynch = lambda snap, villagers: 3
+    texts = [m.content for m in (agent.choose_message(s, ctx(0)) for _ in range(3))
+             if isinstance(m, SendMessage) and not m.recipients]
+    facts = _facts([(1, "I'm voting Player3, they seem off.")] + [(0, t) for t in texts], me=5)
+    assert facts.unison == []
+    assert any("joining Player1's vote on Player3" in t for t in texts)

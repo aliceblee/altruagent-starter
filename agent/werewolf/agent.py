@@ -30,7 +30,7 @@ from typing import Any, Callable
 from altruagent import TERMINATE_MESSAGING, DecisionContext, GameState, SendMessage
 
 from .beliefs import Beliefs, infer
-from .parsing import ABSTAIN, SEER, VILLAGER, WOLF, ChatFacts, Resolver, Snapshot, read_message, snapshot
+from .parsing import ABSTAIN, SEER, UNISON_GAP, VILLAGER, WOLF, ChatFacts, Resolver, Snapshot, read_message, snapshot
 
 MAX_CHATS_PER_DAY = 4  # the server allows 5; keep one in reserve
 MAX_WORDS = 45  # the server's cap is 50
@@ -594,6 +594,9 @@ class WerewolfAgent:
             aside = self._partner_aside(snap)
             if self._no_info(snap, self._beliefs(snap, private=False)):
                 return f"Villager here. No info yet, so no vote from me until the Seer speaks.{aside}", {"intent": "wait"}
+            follow = self._follow_line(snap, target)
+            if follow is not None:
+                return f"Villager here. {follow}{aside}".strip(), {"intent": "vote", "vote": target}
             return f"Villager here. {self._vote_line(target)} {reason}{aside}".strip(), {"intent": "vote", "vote": target}
         if target is None:
             return None
@@ -683,6 +686,19 @@ class WerewolfAgent:
             if seat != snap.me and seat not in cleared:
                 return seat
         return self.rng.choice(snap.living_others())
+
+    def _follow_line(self, snap: Snapshot, target: int) -> str | None:
+        """Wolf: if our partner just pushed the same target, echoing it right away is the
+        "two players in unison" tell smart villagers look for. Present our vote as
+        following someone instead, crediting a non-partner who pushed it if there is one."""
+        recent = [(s, n) for s, t, d, n in self.chat.pushes
+                  if d == snap.day and t == target and self.chat.public_messages - n <= UNISON_GAP + 1]
+        if not any(s in snap.partners for s, _ in recent):
+            return None
+        backers = [s for s, t, d, _ in self.chat.pushes if d == snap.day and t == target and s != snap.me]
+        credit = next((s for s in backers if s not in snap.partners), backers[0])
+        self._announced_target = target
+        return f"Okay, joining {_p(credit)}'s vote on {_p(target)}."
 
     def _partner_aside(self, snap: Snapshot) -> str:
         """Day 1 only: a mild word of doubt about our partner, so the two of us don't
