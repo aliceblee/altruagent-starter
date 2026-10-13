@@ -54,6 +54,7 @@ class WerewolfAgent:
     counter_claim = "self"  # True: when either wolf is outed; "self": only when I am; False: never
     seer_claim_day = 2  # claim on this day at the latest, even without a wolf found
     rescue = True  # rally the table onto our top suspect when votes pile up on us
+    call_out_unison = True  # villager/seer: point out two players pushing the same target in unison
     # Wolf play.
     # "accuser": "I checked my accuser: WOLF"; "other": a check on someone else plus "my accuser is
     # lying". "other" avoids the reactive-claim tell but tested no better against smart villagers
@@ -669,7 +670,7 @@ class WerewolfAgent:
         self._announced_target = pick
         return (f"No hard info yet since the seer can't share anything yet. My vampiric psychic ability tells me "
                 f"it's {_p(pick)}, something about their reasoning. We should vote to avoid a split.",
-                {"intent": "vote", "vote": pick})
+                {"intent": "vote", "vote": pick, "psychic": True})
 
     def _psychic_pick(self, snap: Snapshot, cleared: set[int]) -> int:
         """A random player, but the same one for every agent of ours in this game and day
@@ -699,6 +700,26 @@ class WerewolfAgent:
         any claim): naming a target now would only be a coin flip that splits the table."""
         values = [beliefs.p_wolf.get(s, 0.0) for s in snap.living_others()]
         return not values or max(values) - min(values) < 0.02
+
+    def _unison_call_out(self, snap: Snapshot, target: int) -> tuple[str, dict] | None:
+        """Villager or seer: two other players jumped on the same target at the same time,
+        unprompted. That's how a wolf pair coordinates, so say so (once per pair a day)."""
+        if not self.call_out_unison or snap.role == WOLF:
+            return None
+        for first, second, pushed, day in self.chat.unison:
+            key = f"unison:{min(first, second)}:{max(first, second)}"
+            if day != snap.day or key in self._said or snap.me in (first, second):
+                continue
+            if first not in snap.alive or second not in snap.alive:
+                continue
+            self._said.add(key)
+            who = "me" if pushed == snap.me else _p(pushed)
+            return (
+                f"{_p(first)} looks suspicious, and {_p(second)} looks suspicious too: they jumped on {who} "
+                f"in unison, with nothing to go on. That's how two werewolves coordinate. I'm watching them both.",
+                {"intent": "suspect", "vote": None},
+            )
+        return None
 
     def _votes_against_me(self, snap: Snapshot) -> list[int]:
         """Living players whose latest announced vote today is me."""
@@ -751,6 +772,9 @@ class WerewolfAgent:
                 f"I'm {claim}. {who} pushing me without evidence is exactly what a wolf would do. {self._vote_line(target)}",
                 {"intent": "defend", "vote": target},
             )
+        unison = self._unison_call_out(snap, target)
+        if unison is not None:
+            return unison
         new_claims = [c for c in self.chat.seer_claims if c in snap.alive and c not in self._reacted_claims and c != snap.me]
         if new_claims:
             self._reacted_claims |= set(new_claims)

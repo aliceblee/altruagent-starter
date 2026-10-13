@@ -384,13 +384,43 @@ class ChatFacts:
     vote_intents: dict[int, dict[int, int]] = field(default_factory=dict)  # day -> {speaker: target}
     message_counts: dict[int, int] = field(default_factory=dict)
     private_from: list[tuple[int, str, int]] = field(default_factory=list)  # (sender, text, day) sent only to me
+    # Unprompted vote announcements, in order: (speaker, target, day, public message number).
+    # "Unprompted": not joining someone ("joining PlayerY's vote"), not our shared psychic pick,
+    # and not a target a seer claimant called a wolf.
+    pushes: list[tuple[int, int, int, int]] = field(default_factory=list)
+    # Two players who pushed the same target within UNISON_GAP public messages of each other,
+    # each for the first time: (first, second, target, day).
+    unison: list[tuple[int, int, int, int]] = field(default_factory=list)
+    public_messages: int = 0
 
     def intents_on(self, day: int) -> dict[int, int]:
         return self.vote_intents.get(day, {})
 
 
+UNISON_GAP = 2
+_FOLLOW = re.compile(r"\bjoin(?:ing|s)?\b|\bagree\b|\bsecond(?:ing)?\b|\bwith\s+player\s*\d|\bpsychic\b", re.I)
+
+
+def _record_push(facts: ChatFacts, sender: int, target: int, day: int, text: str) -> None:
+    if _FOLLOW.search(text):
+        return  # following someone else, or our own shared day-1 pick
+    if any(results.get(target) == WOLF for results in facts.claimed_results.values()):
+        return  # piling onto a seer claimant's "wolf" is natural, not coordination
+    if any(s == sender and t == target and d == day for s, t, d, _ in facts.pushes):
+        return  # only the first push counts
+    for other, t, d, n in reversed(facts.pushes):
+        if d != day or facts.public_messages - n > UNISON_GAP:
+            break
+        if t == target and other != sender and other not in facts.seer_claims and sender not in facts.seer_claims:
+            facts.unison.append((other, sender, target, day))
+            break
+    facts.pushes.append((sender, target, day, facts.public_messages))
+
+
 def read_message(facts: ChatFacts, sender: int, text: str, recipients: list[int], day: int, me: int, resolver: Resolver) -> None:
     facts.message_counts[sender] = facts.message_counts.get(sender, 0) + 1
+    if not recipients:
+        facts.public_messages += 1
     if recipients and sender != me:
         facts.private_from.append((sender, text, day))
     if sender == me:
@@ -426,6 +456,8 @@ def read_message(facts: ChatFacts, sender: int, text: str, recipients: list[int]
             if vote_target and not _NEGATION.search(before[-15:]):
                 facts.vote_intents.setdefault(day, {})[sender] = seat
                 facts.accusations.append((sender, seat, day))
+                if not recipients:
+                    _record_push(facts, sender, seat, day, text)
             elif wolfish and not clearish:
                 facts.accusations.append((sender, seat, day))
             elif clearish and not wolfish:

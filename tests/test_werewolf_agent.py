@@ -705,3 +705,49 @@ def test_endgame_steering_never_overrides_our_vote_when_it_cannot_change_the_res
     _talk(agent, 1, obs, talk, day=2, alive=alive, calls=2)
     vote = agent.choose_action(state(1, obs, legal=[3, 4, 5, 6, 7], day=2, alive=alive), ctx(1))
     assert vote.action_id == "5"
+
+
+# -- unison pushes ----------------------------------------------------------------------------
+
+def _facts(messages, me=6):
+    facts = ChatFacts()
+    for sender, text in messages:
+        read_message(facts, sender, text, [], 1, me, RESOLVER)
+    return facts
+
+
+def test_two_back_to_back_unprompted_pushes_are_unison():
+    facts = _facts([(1, "I'm voting Player3."), (4, "Vote Player3, they seem off.")])
+    assert facts.unison == [(1, 4, 3, 1)]
+
+
+@pytest.mark.parametrize("messages", [
+    [(1, "I'm voting Player3."), (4, "Okay, joining Player1's vote on Player3 so we don't split.")],  # following
+    [(1, "My vampiric psychic ability tells me it's Player3."), (4, "My psychic sense says it's Player3 too, I'm voting Player3.")],
+    [(2, "I am the Seer. My checks: Player3 = WOLF."), (1, "I'm voting Player3."), (4, "I'm voting Player3.")],  # seer-backed
+    [(1, "I'm voting Player3."), (0, "hi"), (2, "hello"), (5, "hey"), (4, "I'm voting Player3.")],  # far apart
+])
+def test_not_unison(messages):
+    assert _facts(messages).unison == []
+
+
+def test_villager_calls_out_a_unison_pair_once():
+    agent = WerewolfAgent(rng=random.Random(0))
+    talk = [(1, "I'm voting Player3."), (4, "Vote Player3, they seem off.")]
+    s = state(6, "Your role: villager.", phase="messaging", messages=talk, day=2,
+              dead=[{"player": "Player0", "role": "villager", "cause": "night_kill", "day": 2}],
+              alive=[1, 2, 3, 4, 5, 6])
+    texts = [m.content for m in (agent.choose_message(s, ctx(6)) for _ in range(4)) if isinstance(m, SendMessage)]
+    callouts = [t for t in texts if "in unison" in t]
+    assert len(callouts) == 1 and "Player1 looks suspicious" in callouts[0] and "Player4 looks suspicious too" in callouts[0]
+    facts = _facts([(6, callouts[0])], me=0)  # other agents read it as suspicion of both
+    assert {(6, 1, 1), (6, 4, 1)} <= set(facts.accusations)
+
+
+def test_wolf_never_calls_out_unison():
+    agent = WerewolfAgent(rng=random.Random(0))
+    talk = [(2, "I'm voting Player3."), (4, "Vote Player3, they seem off.")]
+    s = state(0, WOLF_OBS, phase="messaging", messages=talk, day=2, alive=[0, 1, 2, 3, 4, 5],
+              dead=[{"player": "Player6", "role": "villager", "cause": "night_kill", "day": 2}])
+    texts = [m.content for m in (agent.choose_message(s, ctx(0)) for _ in range(4)) if isinstance(m, SendMessage)]
+    assert not any("in unison" in t for t in texts)

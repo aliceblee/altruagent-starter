@@ -53,6 +53,8 @@ class Weights:
     # 1-6 points, because innocent villagers who suspect each other then split
     # their votes instead of converging. Try 1.2-1.4 against real opponents.
     accused_me_falsely: float = 1.0
+    # Two players pushing the same target in unison, unprompted (see parsing.ChatFacts.unison).
+    unison_push: float = 1.5  # simulator: call-out alone +6 pts village wins, with 1.5 +11 (2.0: +15, likely flattered)
 
 
 DEFAULT_WEIGHTS = Weights()
@@ -162,6 +164,9 @@ def infer(
             for speaker, target, _ in chat.clears:
                 if speaker in wset and target in wset:
                     weight *= w.wolf_clears_partner
+            for first, second, _, _ in chat.unison:
+                if first in wset and second in wset:
+                    weight *= w.unison_push
             for accuser in false_accusers:
                 if accuser in wset:
                     weight *= w.accused_me_falsely
