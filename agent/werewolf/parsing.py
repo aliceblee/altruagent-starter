@@ -19,6 +19,8 @@ ABSTAIN = 7
 WOLF, SEER, VILLAGER = "wolf", "seer", "villager"
 
 _PLAYER_RE = re.compile(r"\bplayer\s*[_#-]?\s*(\d+)\b", re.I)
+# Other agents often abbreviate: "P6's counter-claim", "P1 and P2". Capital P only.
+_SHORT_RE = re.compile(r"\bP\s?(\d)\b")
 _SENTENCE_SPLIT = re.compile(r"[.!?\n;]+")
 
 
@@ -108,7 +110,7 @@ class Resolver:
                 return self.by_name[text.casefold()]
             if text.isdigit():
                 return self.seat(int(text))
-            match = _PLAYER_RE.fullmatch(text)
+            match = _PLAYER_RE.fullmatch(text) or _SHORT_RE.fullmatch(text)
             if match:
                 return self.seat(int(match.group(1)))
         return None
@@ -116,7 +118,7 @@ class Resolver:
     def mentions(self, text: str) -> list[tuple[int, int, int]]:
         """(seat, start, end) for every player mentioned in ``text``, in order."""
         found: list[tuple[int, int, int]] = []
-        for m in _PLAYER_RE.finditer(text):
+        for m in list(_PLAYER_RE.finditer(text)) + list(_SHORT_RE.finditer(text)):
             seat = int(m.group(1))
             if 0 <= seat < self.n:
                 found.append((seat, m.start(), m.end()))
@@ -362,6 +364,20 @@ _VOTE_BEFORE = re.compile(
 )
 _RESULT_BEFORE = re.compile(r"(?:check(?:ed)?|investigat\w*|inspect\w*|look(?:ed)?\s+at|saw|peek\w*)\s*(?:on)?\s*$", re.I)
 _NEGATION = re.compile(r"\b(?:not|n't|never|no)\b", re.I)
+# "Player0 has identified them as a wolf", "Player6 claims...": the name is the subject
+# reporting something, not the one being called a wolf.
+_REPORTING_AFTER = re.compile(
+    r"^\s*(?:['’]s\s+)?(?:has|have|had|just)?\s*(?:identified|found|checked|named|called|said|says|claims?|claimed"
+    r"|accused|accuses|thinks?|believes?|suspects?|counter-?claimed|pointed|noted|asked)\b",
+    re.I,
+)
+# "I support Player0", "trust Player0", "backing Player0": an endorsement, never an accusation.
+_SUPPORT_BEFORE = re.compile(
+    r"(?:support(?:ing)?|trust(?:ing)?|back(?:ing)?|believ(?:e|ing)|agree(?:ing)?\s+with|side\s+with|defend(?:ing)?)\s+$",
+    re.I,
+)
+# Text in quotes is someone else's words ("both say 'confident in my vote for Player4'").
+_QUOTED = re.compile(r"[\"“][^\"”]{3,}?[\"”]|(?<=[\s:(])['‘][^'’]{3,}?['’](?=[\s.,;:!?)]|$)")
 # A claimed result reads "Player3 is a wolf", "Player3 = WOLF", "Player3: villager".
 _RESULT_AFTER = re.compile(
     r"^\s*(?:is|was|=|:|->|=>)\s*(?:definitely\s+|a\s+|an\s+)*(?:not\s+(?:a\s+)?)?"
@@ -398,7 +414,12 @@ class ChatFacts:
 
 
 UNISON_GAP = 2
-_FOLLOW = re.compile(r"\bjoin(?:ing|s)?\b|\bagree\b|\bsecond(?:ing)?\b|\bwith\s+player\s*\d|\bpsychic\b", re.I)
+_FOLLOW = re.compile(
+    r"\bjoin(?:ing|s)?\b|\bagree\b|\bsecond(?:ing)?\b|\bwith\s+player\s*\d|\bpsychic\b|\bback(?:ing|s)?\b"
+    r"|\bsupport(?:ing|s)?\b|\bfollow(?:ing|s)?\b|\bbehind\b|\bon\s+board\b"
+    r"|player\s*\d+\s*['’]s\s+(?:vote|call|push|pick|lead|choice)",
+    re.I,
+)
 
 
 def _record_push(facts: ChatFacts, sender: int, target: int, day: int, text: str) -> None:
@@ -436,7 +457,8 @@ def read_message(facts: ChatFacts, sender: int, text: str, recipients: list[int]
         facts.villager_claims.add(sender)
 
     is_claimant = sender in facts.seer_claims
-    for sentence in _sentences(text):
+    unquoted = _QUOTED.sub(" ", text)
+    for sentence in _sentences(unquoted):
         mentions = resolver.mentions(sentence)
         for i, (seat, start, end) in enumerate(mentions):
             if seat == sender:
@@ -446,6 +468,16 @@ def read_message(facts: ChatFacts, sender: int, text: str, recipients: list[int]
             before = sentence[max(0, start - 40):start]
             wolfish = bool(_WOLF_WORDS.search(after))
             clearish = bool(_CLEAR_WORDS.search(after))
+            # "Player3, what do you think?" / "Player3, Player5: one of you..." addresses them. Only
+            # at the start of a sentence or in a list of names there, never "I checked Player2: wolf".
+            lead_in = sentence[:start] if i == 0 else sentence[mentions[i - 1][2]:start]
+            in_address_position = lead_in.strip(" ,:") in ("", "and", "or") and (i == 0 or not before.strip(" ,:").endswith(":"))
+            vocative = (in_address_position and re.match(r"^\s*[,:]", after) is not None
+                        and not re.search(r"\byou", after[:20], re.I))
+            if vocative or _REPORTING_AFTER.search(after):
+                wolfish = clearish = False  # addressing them, or reporting what they said
+            if _SUPPORT_BEFORE.search(before):
+                wolfish, clearish = False, True
             negated = bool(_NEGATION.search(after.split(",")[0])) if (wolfish or clearish) else False
             if wolfish and negated and not clearish:
                 wolfish, clearish = False, True

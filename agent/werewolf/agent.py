@@ -85,6 +85,8 @@ class WerewolfAgent:
         self._said: set[str] = set()  # topics already covered today
         self._sent_opener = False
         self._session: str = ""
+        self._psychic_pick_day: int | None = None
+        self._voice = (rng or random.Random()).choice(_VOICES)
         self._resolver: Resolver | None = None
         self._reacted_claims: set[int] = set()
         self._reacted_accusers: set[int] = set()
@@ -158,7 +160,7 @@ class WerewolfAgent:
         text, facts = plan
         if self.polish is not None:
             try:
-                text = self.polish(text, facts) or text
+                text = self.polish(text, {**facts, "voice": self._voice}) or text
             except Exception as exc:  # noqa: BLE001 - never let chat polish break the game
                 self.log(f"[werewolf] chat polish failed: {exc!r}")
         text = self._with_readable_vote(text, facts.get("vote"))
@@ -628,6 +630,18 @@ class WerewolfAgent:
             return not self._claimed_seer and not any(v == WOLF for v in snap.seer_results.values())
         return snap.role in (VILLAGER, None)
 
+    def _protected(self, snap: Snapshot) -> set[int]:
+        """Players a non-wolf must never call a wolf: a seat our seer checked as innocent,
+        and a credible seer claimant (in testing, our agents attacked the real seer for
+        a misread remark and other agents rightly turned on us for it)."""
+        if snap.role == WOLF:
+            return set()
+        protected = {t for t, v in snap.seer_results.items() if v != WOLF}
+        beliefs = self._beliefs(snap)
+        protected |= {c for c in self.chat.seer_claims
+                      if c in snap.alive and c != snap.me and beliefs.p_wolf.get(c, 1.0) < 0.35}
+        return protected
+
     def _no_hard_info(self, snap: Snapshot) -> bool:
         """Day 1 before anything verifiable: no seer claim, nobody dead, no votes cast.
         (Announced votes and accusations are talk, not information.)"""
@@ -649,7 +663,8 @@ class WerewolfAgent:
                 intents.pop(speaker, None)
                 intents[speaker] = t
         cleared = {t for t, v in snap.seer_results.items() if v != WOLF}
-        against_me = [voter for voter, t in intents.items() if t == snap.me and voter not in self._reacted_accusers]
+        against_me = [voter for voter, t in intents.items()
+                      if t == snap.me and voter not in self._reacted_accusers and voter not in self._protected(snap)]
         if against_me and "day1_accuse" not in self._said:
             # Once: name the first accuser; if more votes pile on, the rescue message follows.
             self._said.add("day1_accuse")
@@ -671,6 +686,7 @@ class WerewolfAgent:
                     {"intent": "vote", "vote": pick})
         pick = self._psychic_pick(snap, cleared)
         self._announced_target = pick
+        self._psychic_pick_day = snap.day
         return (f"No hard info yet since the seer can't share anything yet. My vampiric psychic ability tells me "
                 f"it's {_p(pick)}, something about their reasoning. We should vote to avoid a split.",
                 {"intent": "vote", "vote": pick, "psychic": True})
@@ -723,7 +739,7 @@ class WerewolfAgent:
         if not self.call_out_unison or snap.role == WOLF:
             return None
         for first, second, pushed, day in self.chat.unison:
-            key = f"unison:{min(first, second)}:{max(first, second)}"
+            key = "unison"  # once a day: three agents posting eight call-outs in testing was spam
             if day != snap.day or key in self._said or snap.me in (first, second):
                 continue
             if first not in snap.alive or second not in snap.alive:
@@ -777,6 +793,13 @@ class WerewolfAgent:
         if rescue is not None:
             return rescue
         accusers = [a for a in self._accusers_of(snap, snap.me) if a not in self._reacted_accusers]
+        protected = self._protected(snap)
+        friendly = [a for a in accusers if a in protected and a in self.chat.seer_claims]
+        accusers = [a for a in accusers if a not in protected]
+        if friendly and not accusers:
+            self._reacted_accusers |= set(friendly)
+            return (f"{_p(friendly[0])}, I'm on your side, not against you. {self._vote_line(target)}",
+                    {"intent": "vote", "vote": target})
         if accusers:
             self._reacted_accusers |= set(accusers)
             who = " and ".join(_p(a) for a in accusers)
@@ -796,6 +819,11 @@ class WerewolfAgent:
             self._reacted_claims |= set(new_claims)
             beliefs = self._beliefs(snap, private=snap.role != WOLF)
             c = new_claims[0]
+            if snap.role != WOLF and beliefs.p_wolf.get(c, 0) < 0.35 and self._psychic_pick_day == snap.day:
+                # Other agents read an unexplained switch away from our psychic pick as a flip-flop.
+                self._psychic_pick_day = None
+                return (f"Dropping my psychic guess now that {_p(c)} has claimed seer; a real check beats a hunch. "
+                        f"{self._vote_line(target)}", {"intent": "vote", "vote": target})
             if snap.role != WOLF and beliefs.p_wolf.get(c, 0) < 0.35:
                 return f"{_p(c)}'s seer claim is credible. {self._vote_line(target)}", {"intent": "vote", "vote": target}
             return f"Noted {_p(c)}'s claim. {self._vote_line(target)}", {"intent": "vote", "vote": target}
@@ -820,7 +848,10 @@ class WerewolfAgent:
             return "The wolves killed the person who suspected them."
         if target in self.chat.seer_claims:
             return "Their seer claim doesn't add up."
-        if any(spk == target and tgt in self.chat.seer_claims for spk, tgt, _ in self.chat.accusations):
+        credible = {c for c in self.chat.seer_claims
+                    if c != target and beliefs.p_wolf.get(c, 1.0) < 0.35 and snap.dead.get(c, None) is None}
+        credible |= {s for s, d in snap.dead.items() if d.role == SEER and s in self.chat.seer_claims}
+        if any(spk == target and tgt in credible for spk, tgt, _ in self.chat.accusations):
             return "They attacked the seer claim."
         if self.chat.message_counts.get(target, 0) == 0 and snap.day >= 1:
             return "They've said nothing useful."
@@ -851,6 +882,10 @@ class WerewolfAgent:
         template = self.rng.choice(_WHISPERS)
         return SendMessage(template.format(lynch=_p(lynch), kill=_p(kill)), [partners[0]])
 
+
+# Each agent rewrites its messages in its own voice, so two of ours at one table don't post
+# near-identical text (other agents flagged that as "copy-paste coordination").
+_VOICES = ("blunt and brief", "calm and analytical", "warm and conversational", "dry and witty", "earnest and direct")
 
 _WHISPERS = (
     "Partner: vote {lynch} today, kill {kill} tonight. Don't defend me openly.",

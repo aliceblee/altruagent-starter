@@ -767,3 +767,75 @@ def test_wolf_does_not_echo_its_partners_push_in_unison():
     facts = _facts([(1, "I'm voting Player3, they seem off.")] + [(0, t) for t in texts], me=5)
     assert facts.unison == []
     assert any("joining Player1's vote on Player3" in t for t in texts)
+
+
+# -- regressions from Testing games b4bdb262 (mixed, other teams in seats 3-6) and fd2e7047 -------
+
+def test_endorsing_the_seer_is_not_accusing_them():
+    facts = _facts([(2, "As a villager, I support Player0's seer claim and trust their judgment. I'm voting for "
+                       "Player6, as Player0 has identified them as a wolf.")])
+    assert (2, 0) not in {(a, b) for a, b, _ in facts.accusations}
+    assert (2, 0) in {(a, b) for a, b, _ in facts.clears}
+
+
+def test_quoted_words_are_not_the_speakers_accusation():
+    facts = _facts([(3, "Compare P1 and P2 today: both say 'confident in my vote for Player4', nearly word for word.")])
+    assert 4 not in {b for _, b, _ in facts.accusations} and facts.intents_on(1) == {}
+
+
+def test_short_player_names_are_understood():
+    facts = _facts([(4, "I think P6 is the wolf here."), (5, "Voting P2.")])
+    assert (4, 6) in {(a, b) for a, b, _ in facts.accusations} and facts.intents_on(1)[5] == 2
+
+
+def test_addressing_players_is_not_accusing_them():
+    facts = _facts([(6, "Player3, Player5: one of the two seer claims is a wolf.")])
+    assert facts.accusations == []
+
+
+def test_a_known_innocent_or_a_credible_seer_is_never_called_a_wolf():
+    # Our seer had checked Player5 as a villager; Player5 then pushed it. Defend without calling P5 a wolf.
+    agent = WerewolfAgent(rng=random.Random(0))
+    obs = "Your role: seer. Night 1: you investigated Player5: villager."
+    texts = [m.content for m in (agent.choose_message(state(2, obs, phase="messaging", day=2, alive=[1, 2, 3, 5, 6],
+             dead=[{"player": "Player0", "role": "villager", "cause": "vote", "day": 1},
+                   {"player": "Player4", "role": "villager", "cause": "night_kill", "day": 2}],
+             messages=[(5, "Player2 is suspicious, I'm voting Player2.")]), ctx(2)) for _ in range(4))
+             if isinstance(m, SendMessage)]
+    assert not any("Player5" in t and ("wolf" in t.lower() or "suspicious" in t.lower()) for t in texts)
+
+
+def test_villager_answers_a_credible_seer_who_pushed_it_with_support():
+    agent = WerewolfAgent(rng=random.Random(0))
+    talk = [(0, "I am the Seer. My checks: Player6 = WOLF. I'm voting Player6."),
+            (0, "As the Seer, Player2's remarks look like wolf behavior.")]
+    texts = [m.content for m in (agent.choose_message(state(2, "Your role: villager.", phase="messaging", messages=talk), ctx(2))
+             for _ in range(4)) if isinstance(m, SendMessage)]
+    assert any("Player0, I'm on your side" in t for t in texts)
+    heard = _facts([(2, t) for t in texts], me=5)  # how other agents read us
+    assert (2, 0) not in {(a, b) for a, b, _ in heard.accusations}
+
+
+def test_dropping_a_psychic_pick_for_a_seer_claim_is_explained():
+    agent = WerewolfAgent(rng=random.Random(0))
+    s = state(1, "Your role: villager.", phase="messaging")
+    agent.choose_message(s, ctx(1))
+    agent.choose_message(s, ctx(1))  # psychic pick
+    claim = state(1, "Your role: villager.", phase="messaging",
+                  messages=[(0, "I am the Seer. My checks: Player6 = WOLF. I'm voting Player6.")])
+    texts = [m.content for m in (agent.choose_message(claim, ctx(1)) for _ in range(2)) if isinstance(m, SendMessage)]
+    assert any(t.startswith("Dropping my psychic guess now that Player0 has claimed seer") and "Player6" in t for t in texts)
+
+
+def test_backing_someones_vote_is_following_not_unison():
+    facts = _facts([(3, "I'm voting Player0."), (5, "I'm backing Player3's vote on Player0 to keep us united.")])
+    assert facts.unison == []
+
+
+def test_at_most_one_unison_call_out_a_day():
+    agent = WerewolfAgent(rng=random.Random(0))
+    talk = [(1, "I'm voting Player3."), (4, "Vote Player3."), (0, "I'm voting Player5."), (2, "Voting Player5.")]
+    s = state(6, "Your role: villager.", phase="messaging", messages=talk, day=2, alive=[0, 1, 2, 3, 4, 5, 6],
+              dead=[])
+    texts = [m.content for m in (agent.choose_message(s, ctx(6)) for _ in range(4)) if isinstance(m, SendMessage)]
+    assert sum("in unison" in t for t in texts) == 1

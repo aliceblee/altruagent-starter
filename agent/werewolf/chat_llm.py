@@ -53,8 +53,11 @@ def _players(text: str) -> set[int]:
 def make_polisher(provider: Any, log: Callable[[str], None] = lambda _m: None) -> Callable[[str, dict], str]:
     def polish(draft: str, facts: dict) -> str:
         opener = facts.get("intent") == "opener"
+        system = _OPENER_SYSTEM if opener else _SYSTEM
+        if facts.get("voice"):
+            system += f" Write in a {facts['voice']} voice."
         messages = [
-            {"role": "system", "content": _OPENER_SYSTEM if opener else _SYSTEM},
+            {"role": "system", "content": system},
             {"role": "user", "content": f"{'Example' if opener else 'Draft'}: {draft}"},
         ]
         try:

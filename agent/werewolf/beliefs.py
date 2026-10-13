@@ -120,6 +120,12 @@ def infer(
         pairs |= {(v.voter, v.day) for v in snap.votes if v.target == snap.me}
         false_accusers = [s for s, _ in pairs if s != snap.me]
 
+    # At most MAX_REPEATS per speaker, target and day: repeating an accusation five times
+    # isn't five times the evidence (in a live game, chatty players cleared themselves just
+    # by repeating one), but counting only once lost ~4 points of village wins in the simulator.
+    accusation_pairs = _capped(chat.accusations)
+    clear_pairs = _capped(chat.clears)
+
     totals_w = {s: 0.0 for s in seats}
     totals_s = {s: 0.0 for s in seats}
     z = 0.0
@@ -158,10 +164,10 @@ def infer(
                 if vote.voter in wset and vote.target in lynched and vote.day == lynched[vote.target].day:
                     role = lynched[vote.target].role
                     weight *= w.wolf_voted_wolf_lynch if role == WOLF else w.wolf_voted_villager_lynch
-            for speaker, target, _ in chat.accusations:
+            for speaker, target in accusation_pairs:
                 if speaker in wset and target in wset:
                     weight *= w.wolf_accuses_partner
-            for speaker, target, _ in chat.clears:
+            for speaker, target in clear_pairs:
                 if speaker in wset and target in wset:
                     weight *= w.wolf_clears_partner
             for first, second, _, _ in chat.unison:
@@ -187,6 +193,20 @@ def infer(
         return Beliefs({s: (1.0 if known.get(s) == WOLF else share if s in unknown else 0.0) for s in seats},
                        {s: 0.0 for s in seats}, 0)
     return Beliefs({s: totals_w[s] / z for s in seats}, {s: totals_s[s] / z for s in seats}, count)
+
+
+MAX_REPEATS = 2
+
+
+def _capped(events: list[tuple[int, int, int]]) -> list[tuple[int, int]]:
+    seen: dict[tuple[int, int, int], int] = {}
+    out = []
+    for a, b, d in events:
+        n = seen.get((a, b, d), 0)
+        if n < MAX_REPEATS:
+            seen[(a, b, d)] = n + 1
+            out.append((a, b))
+    return out
 
 
 def _consistent(known: dict[int, str], wolves: set[int], seer: int) -> bool:
