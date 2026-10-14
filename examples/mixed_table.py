@@ -11,9 +11,11 @@ before the seat is known.
 Brains (names usable in ``SEATS``):
 
 - ``ours``: the real agent, ``agent.agent.create_agent()``, unchanged.
-- ``openai``, ``claude``, ``gemini``: the stock ``examples.llm_agent``
-  LLMAgent on another model. ``openai`` uses ``OPENAI_API_KEY`` directly;
-  ``claude`` and ``gemini`` go through OpenRouter with ``OPENROUTER_API_KEY``.
+- ``openai``, ``openai_sol``, ``claude``, ``claude_sonnet``, ``gemini``,
+  ``deepseek``, ``mistral``: the stock
+  ``examples.llm_agent`` LLMAgent on another model. The ``openai*`` ones use
+  ``OPENAI_API_KEY`` directly; the others go through OpenRouter with
+  ``OPENROUTER_API_KEY``.
   A missing key turns that seat into ``random`` (with a warning).
 - ``random``: a random legal action, never chats.
 - ``silent``: abstains ("7") whenever it may, never chats.
@@ -47,15 +49,19 @@ SEATS: dict[int, str] = {
     2: "openai",
     3: "claude",
     4: "gemini",
-    5: "fakeseer",
-    6: "injector",
+    5: "claude_sonnet",
+    6: "openai_sol",
 }
 UNLISTED_SEAT = "random"  # any seat missing from SEATS
 
 OPENAI_MODEL = "gpt-6-luna"  # cheap OpenAI tier
+OPENAI_SOL_MODEL = "gpt-6-sol"  # stronger OpenAI tier
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 CLAUDE_MODEL = "anthropic/claude-haiku-5.5"  # OpenRouter ids, checked against /api/v1/models
+CLAUDE_SONNET_MODEL = "anthropic/claude-sonnet-5.5"
 GEMINI_MODEL = "google/gemini-3.8-flash"
+DEEPSEEK_MODEL = "deepseek/deepseek-v4.1-flash"
+MISTRAL_MODEL = "mistralai/mistral-large-4-0"
 INJECT_TARGET = 0  # the seat the injector tries to get voted out (one of ours by default)
 # OpenRouter reserves credit for a reply's max_tokens, and some models default to 65k,
 # which a small balance can't cover (HTTP 402). Answers here are short JSON.
@@ -232,8 +238,12 @@ def _ours(seat: Any) -> Any:
 BRAINS: dict[str, Callable[[Any], Any]] = {
     "ours": _ours,
     "openai": _llm(OPENAI_MODEL, "OPENAI_API_KEY"),
+    "openai_sol": _llm(OPENAI_SOL_MODEL, "OPENAI_API_KEY"),
     "claude": _llm(CLAUDE_MODEL, "OPENROUTER_API_KEY", OPENROUTER_BASE_URL, OPENROUTER_MAX_TOKENS),
+    "claude_sonnet": _llm(CLAUDE_SONNET_MODEL, "OPENROUTER_API_KEY", OPENROUTER_BASE_URL, OPENROUTER_MAX_TOKENS),
     "gemini": _llm(GEMINI_MODEL, "OPENROUTER_API_KEY", OPENROUTER_BASE_URL, OPENROUTER_MAX_TOKENS),
+    "deepseek": _llm(DEEPSEEK_MODEL, "OPENROUTER_API_KEY", OPENROUTER_BASE_URL, OPENROUTER_MAX_TOKENS),
+    "mistral": _llm(MISTRAL_MODEL, "OPENROUTER_API_KEY", OPENROUTER_BASE_URL, OPENROUTER_MAX_TOKENS),
     "random": lambda seat: RandomBrain(),
     "silent": lambda seat: SilentBrain(),
     "accuser": lambda seat: AccuserBrain(),
