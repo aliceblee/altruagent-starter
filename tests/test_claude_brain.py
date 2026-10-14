@@ -131,3 +131,73 @@ def test_router_uses_claude_when_keyed_and_rules_when_asked(monkeypatch):
     monkeypatch.delenv("WEREWOLF_BRAIN", raising=False)
     assert isinstance(Agent()._player(ctx(6)), ClaudeWerewolfAgent)
     assert isinstance(Agent(brain="rules")._player(ctx(6)), WerewolfAgent)
+
+
+# -- chat rules enforced in code ------------------------------------------------------------------
+
+
+def test_day1_opener_is_sent_word_for_word_without_asking_claude():
+    from agent.werewolf.agent import DAY1_OPENER
+
+    client = FakeClient()
+    msg = brain(client).choose_message(chat_state(day=1), ctx(6))
+    assert msg.content == DAY1_OPENER and client.requests == []
+
+
+def _decisions(request):
+    return request["output_config"]["format"]["schema"]["properties"]["decision"]["enum"]
+
+
+def test_claude_may_not_end_while_accused():
+    client = FakeClient({"notes": "", "decision": "send", "recipient": "Player2", "message": "Player2, I'm a villager."})
+    b = brain(client)
+    msg = b.choose_message(chat_state(day=2, messages=[(2, "Player6 is a wolf, I'm voting Player6.")]), ctx(6))
+    assert _decisions(client.requests[0]) == ["send"]
+    assert "Player2 raised a concern about you" in client.requests[0]["messages"][0]["content"]
+    assert isinstance(msg, SendMessage)
+
+
+def test_claude_may_not_end_when_asked_its_opinion():
+    client = FakeClient({"notes": "", "decision": "send", "recipient": "everyone", "message": "Player3 worries me."})
+    brain(client).choose_message(chat_state(day=2, messages=[(3, "Player6, what do you think?")]), ctx(6))
+    assert _decisions(client.requests[0]) == ["send"]
+    assert "Player3 asked you something" in client.requests[0]["messages"][0]["content"]
+
+
+def test_claude_may_not_end_while_new_messages_arrive_but_may_when_quiet():
+    client = FakeClient({"notes": "", "decision": "send", "recipient": "everyone", "message": "Agreed on Player3."},
+                        {"notes": "", "decision": "end", "recipient": "everyone", "message": ""})
+    b = brain(client)
+    b.choose_message(chat_state(day=2, messages=[(3, "I think Player1 is quiet today.")]), ctx(6))
+    assert _decisions(client.requests[0]) == ["send"]
+    assert b.choose_message(chat_state(day=2), ctx(6)) is TERMINATE_MESSAGING  # nothing new since
+    assert _decisions(client.requests[1]) == ["send", "end"]
+
+
+def test_claude_may_end_when_time_is_nearly_up():
+    client = FakeClient({"notes": "", "decision": "end", "recipient": "everyone", "message": ""})
+    s = chat_state(day=2, messages=[(2, "Player6 is a wolf.")])
+    s.raw["messaging_seconds_left"] = 20
+    assert brain(client).choose_message(s, ctx(6)) is TERMINATE_MESSAGING
+    assert _decisions(client.requests[0]) == ["send", "end"]
+
+
+def test_only_the_real_seer_uses_the_sane_seer_line():
+    line = "Any sane seer would refrain from claiming their seer status on day 1 because that just makes them a target."
+    client = FakeClient({"notes": "", "decision": "send", "recipient": "everyone", "message": line})
+    msg = brain(client).choose_message(chat_state(day=2), ctx(6))
+    assert not (isinstance(msg, SendMessage) and "sane seer" in msg.content.lower())
+
+
+def test_chat_effort_defaults_to_medium():
+    client = FakeClient({"notes": "", "decision": "end", "recipient": "everyone", "message": ""})
+    brain(client).choose_message(chat_state(day=2), ctx(6))
+    assert client.requests[0]["output_config"]["effort"] == "medium"
+
+
+def test_claude_is_overruled_when_it_votes_the_lone_day1_seer_claimant():
+    client = FakeClient({"notes": "", "action_id": "3"})
+    b = brain(client)
+    b.choose_message(chat_state(day=1, messages=[(3, "I am the seer. I checked Player1: villager.")]), ctx(6))  # opener
+    assert b.choose_action(vote_state(), ctx(6)).action_id != "3"
+    assert len(client.requests) == 1  # Claude was asked, and overruled

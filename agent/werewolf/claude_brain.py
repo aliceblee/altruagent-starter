@@ -19,8 +19,15 @@ unless ``WEREWOLF_BRAIN=rules``. Settings (environment or ``.env``):
 - ``WEREWOLF_CLAUDE_MODEL`` (default ``claude-opus-5-5``; ``claude-sonnet-5-5``
   or ``claude-haiku-5-5`` are faster and cheaper)
 - ``WEREWOLF_CLAUDE_EFFORT`` for night actions and votes (default ``medium``)
-  and ``WEREWOLF_CLAUDE_CHAT_EFFORT`` for chat (default ``low``, because the
-  discussion window is only 2 minutes): ``low`` | ``medium`` | ``high``
+  and ``WEREWOLF_CLAUDE_CHAT_EFFORT`` for chat (default ``medium``):
+  ``low`` | ``medium`` | ``high``
+
+Chat rules enforced in code, whatever Claude answers: the day-1 opener is
+sent word for word (``DAY1_OPENER``); Claude may only end its discussion when
+nobody has accused or questioned it since its last message and nothing new has
+come in, or when time is nearly up; the seer never claims on day 1; only our
+real seer uses the "any sane seer" line; the village side never votes out a
+lone day-1 seer claimant.
 """
 
 from __future__ import annotations
@@ -33,14 +40,15 @@ from typing import Any, Callable
 
 from altruagent import TERMINATE_MESSAGING, DecisionContext, GameState, SendMessage
 
-from .agent import MAX_CHATS_PER_DAY, MAX_WORDS, WerewolfAgent
+from .agent import DAY1_OPENER, MAX_CHATS_PER_DAY, MAX_WORDS, WerewolfAgent
 from .parsing import SEER, WOLF, _SEER_CLAIM, snapshot
 
 DEFAULT_MODEL = "claude-opus-5-5"
 MAX_TOKENS = 8000
 ACTION_TIMEOUT = 40.0  # the server auto-plays after 120 s of inactivity
-CHAT_TIMEOUT = 25.0
-MIN_SECONDS_FOR_CLAUDE = 12.0  # less discussion time left than this: use the rule engine's chat
+CHAT_TIMEOUT = 30.0
+MIN_SECONDS_FOR_CLAUDE = 15.0  # less discussion time left than this: use the rule engine's chat
+END_ANYTIME_SECONDS = 25.0  # with less time left than this, Claude may end its discussion whenever it likes
 NOTES_LIMIT = 1500
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 PLAYBOOK = Path(__file__).with_name("playbook.md")
@@ -76,7 +84,7 @@ class ClaudeWerewolfAgent:
         *,
         model: str = DEFAULT_MODEL,
         effort: str = "medium",
-        chat_effort: str = "low",
+        chat_effort: str = "medium",
         advisor: WerewolfAgent | None = None,
         playbook: str | None = None,
         log: Callable[[str], None] | None = None,
@@ -99,6 +107,11 @@ class ClaudeWerewolfAgent:
         self._sent_today = 0
         self._ended_today = False
         self._use_fallbacks = True
+        # What Claude owes a reply to: seat -> "accused you" / "asked you", since our last message.
+        self._owed: dict[int, str] = {}
+        self._accusations_read = 0
+        self._asks_read = 0
+        self._fresh = 0  # chat messages from others since our last decision
 
     # -- runtime hooks ----------------------------------------------------------------------
 
@@ -115,6 +128,11 @@ class ClaudeWerewolfAgent:
         schema = _schema({"notes": {"type": "string"}, "action_id": {"type": "string", "enum": list(legal)}})
         answer = self._ask(state, context, task, schema, effort=self.effort, timeout=ACTION_TIMEOUT)
         choice = legal.get(str((answer or {}).get("action_id")))
+        if choice is not None and choice.action_id.isdigit():
+            snap, _ = self.advisor._update(state, context)
+            if (snap.sub_phase or "day_vote") == "day_vote" and int(choice.action_id) in self.advisor._spared_claimants(snap):
+                self.log(f"[claude] action: won't vote out Player{choice.action_id}, the lone day-1 seer claimant")
+                choice = None
         if choice is None:
             self.log(f"[claude] action: using the rule engine's move {getattr(advice, 'action_id', advice)!r}")
             return advice
@@ -122,29 +140,45 @@ class ClaudeWerewolfAgent:
         return choice
 
     def choose_message(self, state: GameState, context: DecisionContext):
-        self._remember(state, context)
+        self._fresh += self._remember(state, context)
         snap, _ = snapshot(state, context.seat_position)
         if self._chat_day != snap.day:
             self._chat_day, self._sent_today, self._ended_today = snap.day, 0, False
+            self._owed = {}
         advice = self.advisor.choose_message(state, context)
+        self._note_owed(snap)
         if self._ended_today or self._sent_today >= MAX_CHATS_PER_DAY:
             self._ended_today = True
             return TERMINATE_MESSAGING
+        if isinstance(advice, SendMessage) and advice.content == DAY1_OPENER:
+            self.log(f"[claude] says the day-1 opener: {DAY1_OPENER}")
+            return self._sent(advice, None)
         left = state.raw.get("messaging_seconds_left")
         if isinstance(left, (int, float)) and left < MIN_SECONDS_FOR_CLAUDE:
             return self._sent(advice, "little discussion time left")
         others = sorted(s for s in snap.alive if s != snap.me)
         recipients = ["everyone"] + [f"Player{s}" for s in others]
+        owed = [f"Player{seat} {why}" for seat, why in sorted(self._owed.items()) if seat in snap.alive]
+        nearly_up = isinstance(left, (int, float)) and left < END_ANYTIME_SECONDS
+        may_end = nearly_up or not (owed or self._fresh)
+        if may_end:
+            choice = ("Either send one message (decision 'send') or end your part of today's discussion "
+                      "(decision 'end').")
+        else:
+            why = (f"{', '.join(owed)} since your last message" if owed
+                   else "new messages came in since your last turn")
+            choice = (f"Send one message (decision 'send'); you can't end the discussion yet because {why}. "
+                      "Answer it: if someone raised a concern about you or asked your opinion, reply to them by "
+                      "name and share your current read discreetly, in words, never numbers.")
         task = (
-            "It's the day discussion. Either send one message (decision 'send') or end your part of "
-            "today's discussion (decision 'end'). recipient is 'everyone', or one player for a private "
+            f"It's the day discussion. {choice} recipient is 'everyone', or one player for a private "
             f"message only they see. At most {MAX_WORDS} words. You have sent {self._sent_today} of your "
             f"{MAX_CHATS_PER_DAY} messages today.\n"
             f"The rule engine would: {_describe_message(advice)}"
         )
         schema = _schema({
             "notes": {"type": "string"},
-            "decision": {"type": "string", "enum": ["send", "end"]},
+            "decision": {"type": "string", "enum": ["send", "end"] if may_end else ["send"]},
             "recipient": {"type": "string", "enum": recipients},
             "message": {"type": "string"},
         })
@@ -161,6 +195,8 @@ class ClaudeWerewolfAgent:
             return self._sent(advice, "empty message")
         if snap.role == SEER and snap.day <= 1 and _SEER_CLAIM.search(text):
             return self._sent(advice, "the seer never claims on day 1")
+        if snap.role != SEER and "sane seer" in text.lower():
+            return self._sent(advice, "only our real seer uses the 'any sane seer' line")
         to = answer.get("recipient")
         seat = int(to[len("Player"):]) if isinstance(to, str) and to.startswith("Player") else None
         message = SendMessage(text, [seat]) if seat in others else SendMessage(text)
@@ -174,18 +210,32 @@ class ClaudeWerewolfAgent:
 
     # -- helpers ----------------------------------------------------------------------------
 
+    def _note_owed(self, snap: Any) -> None:
+        """Accusations and questions aimed at us that the advisor's parser has read since last time."""
+        chat = self.advisor.chat
+        for speaker, target, day in chat.accusations[self._accusations_read:]:
+            if target == snap.me and speaker != snap.me and day == snap.day:
+                self._owed[speaker] = "raised a concern about you"
+        for speaker, day in chat.asked_me[self._asks_read:]:
+            if speaker != snap.me and day == snap.day:
+                self._owed.setdefault(speaker, "asked you something")
+        self._accusations_read, self._asks_read = len(chat.accusations), len(chat.asked_me)
+
     def _sent(self, decision: Any, fallback_reason: str | None):
         if fallback_reason is not None:
             self.log(f"[claude] message: {fallback_reason}; the rule engine's choice: {_describe_message(decision)}")
         if isinstance(decision, SendMessage):
             self._sent_today += 1
+            self._owed, self._fresh = {}, 0
         else:
             self._ended_today = True
         return decision
 
-    def _remember(self, state: GameState, context: DecisionContext) -> None:
+    def _remember(self, state: GameState, context: DecisionContext) -> int:
+        """Add new chat to the transcript; returns how many came from other players."""
         me = state.raw.get("your_position", context.seat_position)
         day = (state.raw.get("game_state") or {}).get("day")
+        fresh = 0
         for m in state.new_messages:
             if m.index in self._seen or m.type != "chat":
                 continue
@@ -193,6 +243,8 @@ class ClaudeWerewolfAgent:
             sender = "you" if m.sender == me else f"Player{m.sender}"
             to = [("you" if r == me else f"Player{r}") for r in m.recipients]
             self.transcript.append({"day": day, "from": sender, "to": to or "everyone", "text": m.content})
+            fresh += m.sender != me
+        return fresh
 
     def _situation(self, state: GameState, context: DecisionContext) -> str:
         snap, _ = self.advisor._update(state, context)
@@ -311,6 +363,6 @@ def claude_agent_from_env(log: Callable[[str], None] = lambda _m: None,
         anthropic.Anthropic(max_retries=1),
         model=os.environ.get("WEREWOLF_CLAUDE_MODEL", DEFAULT_MODEL),
         effort=os.environ.get("WEREWOLF_CLAUDE_EFFORT", "medium"),
-        chat_effort=os.environ.get("WEREWOLF_CLAUDE_CHAT_EFFORT", "low"),
+        chat_effort=os.environ.get("WEREWOLF_CLAUDE_CHAT_EFFORT", "medium"),
         log=log,
     )

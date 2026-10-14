@@ -40,13 +40,13 @@ BANDWAGON_WEIGHT = 0.06  # per announced vote, when picking among near-equal sus
 # hard info the odds wobble by a few points with every message; following them made our
 # agents flip-flop in chat and then vote for someone they never announced.
 STICKY_MARGIN = 0.12
-# Our first message of day 1, whatever our role. With an LLM configured it is rewritten
-# fresh each game (same joke, new wording); without one it is sent as is.
+# Our first message of day 1, whatever our role, sent word for word. (The old "vegetarian
+# vampire Eddie Cullen" joke got us targeted at LLM tables.)
 # What our seer says on day 1 when someone else claims seer (sent word for word; the seer
 # itself never claims on day 1).
 SANE_SEER_LINE = ("Any sane seer would refrain from claiming their seer status on day 1 "
                   "because that just makes them a target.")
-DAY1_OPENER = "I'm a vegetarian vampire villager Eddie Cullen. I hate werewolves. Raise your hand if you're werewolf?"
+DAY1_OPENER = "Hello! No hard info yet, anyone have a lead? Maybe a seer?"
 
 
 def _p(seat: int) -> str:
@@ -99,6 +99,7 @@ class WerewolfAgent:
         self._reacted_claims: set[int] = set()
         self._reacted_accusers: set[int] = set()
         self._announced_target: int | None = None
+        self._answered_asks = 0  # how many of chat.asked_me we've already answered
         # Seer state.
         self._claimed_seer = False
         # Wolf state.
@@ -147,12 +148,6 @@ class WerewolfAgent:
             self._sent_opener = True
             self._sent_today += 1
             text = DAY1_OPENER
-            if self.polish is not None:
-                try:
-                    text = self.polish(DAY1_OPENER, {"intent": "opener"}) or DAY1_OPENER
-                except Exception as exc:  # noqa: BLE001 - never let chat polish break the game
-                    self.log(f"[werewolf] chat polish failed: {exc!r}")
-            text = " ".join(text.split()[:MAX_WORDS])
             self.log(f"[werewolf] P{snap.me} says: {text}")
             return SendMessage(text)
 
@@ -314,6 +309,8 @@ class WerewolfAgent:
 
     def _village_vote(self, snap: Snapshot, seats: list[int]) -> int:
         beliefs = self._beliefs(snap)
+        spared = self._spared_claimants(snap)
+        seats = [s for s in seats if s not in spared] or seats
         if snap.role == SEER:
             known_wolves = [s for s in seats if snap.seer_results.get(s) == WOLF]
             if known_wolves:
@@ -666,7 +663,22 @@ class WerewolfAgent:
         beliefs = self._beliefs(snap)
         protected |= {c for c in self.chat.seer_claims
                       if c in snap.alive and c != snap.me and beliefs.p_wolf.get(c, 1.0) < 0.35}
-        return protected
+        return protected | self._spared_claimants(snap)
+
+    def _spared_claimants(self, snap: Snapshot) -> set[int]:
+        """A lone seer claimant from day 1, whom the village side never votes for or calls a
+        wolf (team rule: our day-1 opener asks the seer to speak up, so we don't punish it).
+        Not when two claimed on day 1 (one is lying), when the revealed roles disprove the
+        claim, or when we are the seer (then the claim is certainly fake)."""
+        if snap.role in (WOLF, SEER):
+            return set()
+        day1 = [c for c, d in self.chat.seer_claims.items() if d is not None and d <= 1 and c != snap.me]
+        if len(day1) != 1 or day1[0] not in snap.alive:
+            return set()
+        claimant = day1[0]
+        if self._claim_disproved(snap, claimant, self.chat.claimed_results.get(claimant, {})):
+            return set()
+        return {claimant}
 
     def _no_hard_info(self, snap: Snapshot) -> bool:
         """Day 1 before anything verifiable: no seer claim, nobody dead, no votes cast.
@@ -688,7 +700,7 @@ class WerewolfAgent:
             if day == snap.day and speaker != snap.me and speaker in snap.alive and t in snap.alive:
                 intents.pop(speaker, None)
                 intents[speaker] = t
-        cleared = {t for t, v in snap.seer_results.items() if v != WOLF}
+        cleared = {t for t, v in snap.seer_results.items() if v != WOLF} | self._spared_claimants(snap)
         against_me = [voter for voter, t in intents.items()
                       if t == snap.me and voter not in self._reacted_accusers and voter not in self._protected(snap)]
         if against_me and "day1_accuse" not in self._said:
@@ -704,8 +716,8 @@ class WerewolfAgent:
         if pick is not None:  # the seer's found wolf, disguised as a hunch
             self._announced_target = pick
             self._psychic_pick_day = snap.day
-            return (f"No hard info yet since the seer can't share anything yet. My vampiric psychic ability tells me "
-                    f"it's {_p(pick)}, something about their reasoning. We should vote to avoid a split.",
+            return (f"No hard info yet, so a psychic hunch tells me it's {_p(pick)}, something about their reasoning. "
+                    f"Let's vote together to avoid a split.",
                     {"intent": "vote", "vote": pick, "psychic": True})
         backers: dict[int, list[int]] = {}
         for voter, t in intents.items():  # in the order they were announced
@@ -719,8 +731,8 @@ class WerewolfAgent:
         pick = self._psychic_pick(snap, cleared)
         self._announced_target = pick
         self._psychic_pick_day = snap.day
-        return (f"No hard info yet since the seer can't share anything yet. My vampiric psychic ability tells me "
-                f"it's {_p(pick)}, something about their reasoning. We should vote to avoid a split.",
+        return (f"No hard info yet, so a psychic hunch tells me it's {_p(pick)}, something about their reasoning. "
+                f"Let's vote together to avoid a split.",
                 {"intent": "vote", "vote": pick, "psychic": True})
 
     def _psychic_pick(self, snap: Snapshot, cleared: set[int]) -> int:
@@ -836,13 +848,21 @@ class WerewolfAgent:
             self._reacted_accusers |= set(accusers)
             who = " and ".join(_p(a) for a in accusers)
             claim = "the Seer" if (snap.role == SEER and self._claimed_seer) or self._fake_seer else "a villager"
+            self._answered_asks = len(self.chat.asked_me)  # the read below answers them too
+            read = self._discreet_read(snap, target, brief=True)
             if self._claim_busted:
-                return (f"{who} pushing me is exactly what a wolf would do. {self._vote_line(target)}",
+                return (f"{who} pushing me is exactly what a wolf would do. {read} {self._vote_line(target)}",
                         {"intent": "defend", "vote": target})
             return (
-                f"I'm {claim}. {who} pushing me without evidence is exactly what a wolf would do. {self._vote_line(target)}",
+                f"I'm {claim}. {who} pushing me without evidence is what a wolf would do. {read} {self._vote_line(target)}",
                 {"intent": "defend", "vote": target},
             )
+        askers = [a for a, d in self.chat.asked_me[self._answered_asks:] if d == snap.day and a in snap.alive]
+        self._answered_asks = len(self.chat.asked_me)
+        if askers and not self._uses_day1_lines(snap):
+            read = self._discreet_read(snap, target)
+            return (f"{_p(askers[-1])}, {read[0].lower()}{read[1:]} {self._vote_line(target)}",
+                    {"intent": "vote", "vote": target})
         unison = self._unison_call_out(snap, target)
         if unison is not None:
             return unison
@@ -866,6 +886,28 @@ class WerewolfAgent:
                 return f"{self._vote_line(target)} {self._reason(snap, target, self._beliefs(snap, private=snap.role != WOLF))}", {"intent": "vote", "vote": target}
             return f"Changing my vote: {self._vote_line(target)}", {"intent": "vote", "vote": target}
         return None
+
+    def _discreet_read(self, snap: Snapshot, target: int, *, brief: bool = False) -> str:
+        """Our current scoring in words, never numbers: the vote target, a second suspect,
+        and someone we trust. A wolf ranks from public information and never names its
+        partner either way. ``brief``: the target only (when defending ourselves; naming
+        two more players there cost ~2 points of village wins in self-play)."""
+        wolf = snap.role == WOLF
+        beliefs = self._beliefs(snap, private=not wolf)
+        pool = [s for s in snap.living_others() if not (wolf and s in snap.partners)]
+        protected = self._protected(snap)
+        ranked = sorted((s for s in pool if s != target and s not in protected),
+                        key=lambda s: (-beliefs.p_wolf.get(s, 0.0), s))
+        p = beliefs.p_wolf.get(target, 0.0)
+        lead = (f"I'm fairly sure about {_p(target)}" if p >= 0.6 else f"{_p(target)} worries me most"
+                if p >= 0.4 else f"I lean slightly toward {_p(target)}")
+        if brief:
+            return f"My read so far: {lead}."
+        second = f", {_p(ranked[0])} next" if ranked and beliefs.p_wolf.get(ranked[0], 0.0) >= 0.3 else ""
+        trusted = [s for s in sorted(pool, key=lambda s: (beliefs.p_wolf.get(s, 0.0), s))
+                   if s != target and (not ranked or s != ranked[0])]
+        clean = f"; {_p(trusted[0])} reads clean to me" if trusted and beliefs.p_wolf.get(trusted[0], 1.0) < 0.25 else ""
+        return f"My read so far: {lead}{second}{clean}."
 
     def _reason(self, snap: Snapshot, target: int, beliefs: Beliefs) -> str:
         lynched_villagers = {d.seat for d in snap.dead.values() if d.cause and "vote" in d.cause.lower() and d.role != WOLF}

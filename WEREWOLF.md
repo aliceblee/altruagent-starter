@@ -23,13 +23,17 @@ decision it gets:
 The rule engine is also the safety net. If Claude errors, times out (40 s for
 moves; chat stays inside the 2-minute window), refuses, or picks something
 illegal, the rules' move is played. One team rule is enforced in code as
-well: the seer never claims on day 1. Every Claude call is logged (latency,
+well: the day-1 opener ("Hello! No hard info yet, anyone have a lead? Maybe a
+seer?") is sent word for word; Claude can't end its discussion while someone's
+concern or question to it is unanswered or new messages keep arriving (unless
+under 25 s remain); the seer never claims on day 1; only our real seer uses
+the "any sane seer" line. Every Claude call is logged (latency,
 tokens, fallbacks) as `note` lines in `logs/decisions/<session>/seat<N>.jsonl`.
 
 Knobs (`.env`): `WEREWOLF_CLAUDE_MODEL` (`claude-sonnet-5-5` or
 `claude-haiku-5-5` are faster and cheaper), `WEREWOLF_CLAUDE_EFFORT` (votes
 and nights, default `medium`), `WEREWOLF_CLAUDE_CHAT_EFFORT` (default
-`low`), `WEREWOLF_BRAIN=rules` to switch Claude off.
+`medium`), `WEREWOLF_BRAIN=rules` to switch Claude off.
 
 Compare the two brains at one test table with `examples/mixed_table.py`
 (seat kinds `ours_claude` and `ours_rules`).

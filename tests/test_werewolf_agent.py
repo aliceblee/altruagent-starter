@@ -304,17 +304,19 @@ def test_day1_first_message_is_the_eddie_cullen_opener_for_every_role(observatio
     assert not (isinstance(second, SendMessage) and second.content == DAY1_OPENER)
 
 
-def test_day1_opener_is_rewritten_by_the_llm_when_one_is_configured():
+def test_day1_opener_is_sent_word_for_word_even_with_an_llm():
+    from agent.werewolf.agent import DAY1_OPENER
+
     seen = []
 
     def polish(text, facts):
         seen.append(facts)
-        return "Vegetarian vampire villager here, fangs off. Werewolves, paws up!"
+        return "Something else entirely."
 
     agent = WerewolfAgent(rng=random.Random(0), polish=polish)
     first = agent.choose_message(state(2, "Your role: villager.", phase="messaging"), ctx(2))
-    assert first.content == "Vegetarian vampire villager here, fangs off. Werewolves, paws up!"
-    assert seen[0] == {"intent": "opener"}
+    assert first.content == DAY1_OPENER == "Hello! No hard info yet, anyone have a lead? Maybe a seer?"
+    assert seen == []
 
 
 def test_a_failing_llm_falls_back_to_the_written_opener():
@@ -608,8 +610,8 @@ def _villager_day1(messages, seed=0):
 def test_day1_nobody_voted_yet_names_a_psychic_pick_and_votes_it():
     texts, vote = _villager_day1([])
     pick = int(texts[0].split("tells me it's Player")[1][0])
-    assert texts[0] == (f"No hard info yet since the seer can't share anything yet. My vampiric psychic ability "
-                        f"tells me it's Player{pick}, something about their reasoning. We should vote to avoid a split.")
+    assert texts[0] == (f"No hard info yet, so a psychic hunch tells me it's Player{pick}, something about their "
+                        f"reasoning. Let's vote together to avoid a split.")
     assert vote == str(pick) and pick != 6
     facts = ChatFacts()
     read_message(facts, 6, texts[0], [], 1, 0, RESOLVER)  # other agents read it as a vote
@@ -898,3 +900,44 @@ def test_switching_seer_hides_day1_off_restores_the_day1_claim():
     s = state(2, SEER_FOUND_WOLF, phase="messaging")
     texts = [m.content for m in (agent.choose_message(s, ctx(2)) for _ in range(3)) if isinstance(m, SendMessage)]
     assert any(t.startswith("I am the Seer. My checks: Player4 = WOLF") for t in texts)
+
+
+# -- day-1 seer claimant and discreet reads ------------------------------------------------------
+
+
+def test_village_never_votes_the_lone_day1_seer_claimant():
+    agent = WerewolfAgent(rng=random.Random(0))
+    msgs = [(3, "I am the seer. I checked Player1: villager."), (2, "Player3 is a wolf, fake seer. Vote Player3.")]
+    agent.choose_message(state(6, "Your role: villager.", phase="messaging", messages=msgs), ctx(6))
+    vote = agent.choose_action(state(6, "Your role: villager.", legal=[0, 1, 2, 3, 4, 5, 7]), ctx(6))
+    assert vote.action_id != "3"
+
+
+def test_two_day1_claimants_are_not_spared():
+    agent = WerewolfAgent(rng=random.Random(0))
+    msgs = [(3, "I am the seer. Player1 is a wolf."), (4, "I am the seer. Player3 is a wolf.")]
+    agent.choose_message(state(6, "Your role: villager.", phase="messaging", messages=msgs), ctx(6))
+    assert agent._spared_claimants(agent._update(state(6, "Your role: villager."), ctx(6))[0]) == set()
+
+
+def test_asked_for_an_opinion_shares_a_read_in_words():
+    agent = WerewolfAgent(rng=random.Random(0))
+    s = state(6, "Your role: villager.", phase="messaging", day=2,
+              dead=[{"player": "Player0", "role": "villager", "cause": "night_kill", "day": 1}],
+              alive=[1, 2, 3, 4, 5, 6], messages=[(2, "Player6, who do you suspect?")])
+    texts = []
+    for _ in range(3):
+        m = agent.choose_message(s, ctx(6))
+        if isinstance(m, SendMessage):
+            texts.append(m.content)
+    reply = next(t for t in texts if t.startswith("Player2,"))
+    assert "my read so far" in reply and "%" not in reply and "voting" in reply
+
+
+def test_accused_defense_includes_the_read():
+    agent = WerewolfAgent(rng=random.Random(0))
+    s = state(6, "Your role: villager.", phase="messaging", day=2,
+              dead=[{"player": "Player0", "role": "villager", "cause": "night_kill", "day": 1}],
+              alive=[1, 2, 3, 4, 5, 6], messages=[(2, "Player6 is a wolf. I'm voting Player6.")])
+    texts = [m.content for m in (agent.choose_message(s, ctx(6)) for _ in range(3)) if isinstance(m, SendMessage)]
+    assert any("My read so far" in t for t in texts)

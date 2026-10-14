@@ -408,12 +408,20 @@ class ChatFacts:
     # each for the first time: (first, second, target, day).
     unison: list[tuple[int, int, int, int]] = field(default_factory=list)
     public_messages: int = 0
+    # Someone asked me something by name ("Player3, what do you think?"): (sender, day).
+    asked_me: list[tuple[int, int]] = field(default_factory=list)
 
     def intents_on(self, day: int) -> dict[int, int]:
         return self.vote_intents.get(day, {})
 
 
 UNISON_GAP = 2
+_ASK_SPLIT = re.compile(r"(?<=[.!?\n;])")
+_ASK_WORDS = re.compile(
+    r"\?|\b(?:thoughts|opinion|your\s+(?:read|take|view)|what\s+do\s+you\s+think|explain|why\s+(?:did|are|would)\s+you"
+    r"|care\s+to|defend|weigh\s+in|who\s+do\s+you)\b",
+    re.I,
+)
 _FOLLOW = re.compile(
     r"\bjoin(?:ing|s)?\b|\bagree\b|\bsecond(?:ing)?\b|\bwith\s+player\s*\d|\bpsychic\b|\bback(?:ing|s)?\b"
     r"|\bsupport(?:ing|s)?\b|\bfollow(?:ing|s)?\b|\bbehind\b|\bon\s+board\b"
@@ -458,6 +466,9 @@ def read_message(facts: ChatFacts, sender: int, text: str, recipients: list[int]
 
     is_claimant = sender in facts.seer_claims
     unquoted = _QUOTED.sub(" ", text)
+    if any(_ASK_WORDS.search(sentence) and any(seat == me for seat, _, _ in resolver.mentions(sentence))
+           for sentence in _ASK_SPLIT.split(unquoted)):
+        facts.asked_me.append((sender, day))
     for sentence in _sentences(unquoted):
         mentions = resolver.mentions(sentence)
         for i, (seat, start, end) in enumerate(mentions):
