@@ -73,7 +73,7 @@ INJECT_TARGET = 0  # the seat the injector tries to get voted out (one of ours b
 OPENROUTER_MAX_TOKENS = 2000
 # The stock LLM agent asks its model at most 2 times per discussion round, so a table of
 # LLM seats goes quiet within seconds. The server allows 5 chats a day.
-LLM_MESSAGES_PER_ROUND = 4
+LLM_MESSAGES_PER_ROUND = 5  # the server maximum
 
 # --------------------------------------------------------------------------------------------
 
