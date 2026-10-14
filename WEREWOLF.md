@@ -4,7 +4,37 @@
 `agent/werewolf/` (other games fall back to `examples.llm_agent` when
 `OPENAI_API_KEY` is set, else the first legal move).
 
-## How it plays
+## Claude as the brain (default when `ANTHROPIC_API_KEY` is set)
+
+With `ANTHROPIC_API_KEY` in `.env`, Claude (`claude_brain.py`, default model
+`claude-opus-5-5`) makes every Werewolf decision: night kill, seer check,
+day vote, and every chat, including private wolf-to-wolf messages. For each
+decision it gets:
+
+- what the server shows our seat: role, partner, seer results, the living and
+  the dead with their revealed roles, the vote history, the whole chat;
+- the **team playbook**, `agent/werewolf/playbook.md`. **Change strategy
+  here**: it's plain English, no code;
+- its own private notes from earlier decisions (plans, reads, a fake-claim
+  story), so it stays consistent through the game;
+- the rule engine's analysis below: exact P(wolf) / P(seer) per seat, seer
+  claims, unison pushes, and the move the rules would make, as a hint.
+
+The rule engine is also the safety net. If Claude errors, times out (40 s for
+moves; chat stays inside the 2-minute window), refuses, or picks something
+illegal, the rules' move is played. One team rule is enforced in code as
+well: the seer never claims on day 1. Every Claude call is logged (latency,
+tokens, fallbacks) as `note` lines in `logs/decisions/<session>/seat<N>.jsonl`.
+
+Knobs (`.env`): `WEREWOLF_CLAUDE_MODEL` (`claude-sonnet-5-5` or
+`claude-haiku-5-5` are faster and cheaper), `WEREWOLF_CLAUDE_EFFORT` (votes
+and nights, default `medium`), `WEREWOLF_CLAUDE_CHAT_EFFORT` (default
+`low`), `WEREWOLF_BRAIN=rules` to switch Claude off.
+
+Compare the two brains at one test table with `examples/mixed_table.py`
+(seat kinds `ours_claude` and `ours_rules`).
+
+## How the rule engine plays
 
 **Beliefs (`beliefs.py`).** With 7 seats, 2 wolves and 1 seer there are only
 105 possible role assignments, so the agent enumerates all of them, drops the

@@ -10,7 +10,10 @@ before the seat is known.
 
 Brains (names usable in ``SEATS``):
 
-- ``ours``: the real agent, ``agent.agent.create_agent()``, unchanged.
+- ``ours``: the real agent, ``agent.agent.create_agent()``, unchanged (Claude-driven
+  when ``ANTHROPIC_API_KEY`` is set, else the rule engine).
+- ``ours_rules`` / ``ours_claude``: the real agent forced onto the rule engine /
+  the Claude brain, to compare the two at one table.
 - ``openai``, ``claude``, ``gemini``: the stock ``examples.llm_agent``
   LLMAgent on another model. ``openai`` uses ``OPENAI_API_KEY`` directly;
   ``claude`` and ``gemini`` go through OpenRouter with ``OPENROUTER_API_KEY``.
@@ -223,14 +226,17 @@ def _cap_max_tokens(provider: Any, max_tokens: int) -> None:
     provider._http.post = capped
 
 
-def _ours(seat: Any) -> Any:
-    from agent.agent import create_agent
+def _ours(seat: Any, brain: str | None = None) -> Any:
+    from agent.agent import Agent
 
-    return create_agent()
+    load_dotenv()
+    return Agent(brain=brain)
 
 
 BRAINS: dict[str, Callable[[Any], Any]] = {
     "ours": _ours,
+    "ours_rules": lambda seat: _ours(seat, "rules"),
+    "ours_claude": lambda seat: _ours(seat, "claude"),
     "openai": _llm(OPENAI_MODEL, "OPENAI_API_KEY"),
     "claude": _llm(CLAUDE_MODEL, "OPENROUTER_API_KEY", OPENROUTER_BASE_URL, OPENROUTER_MAX_TOKENS),
     "gemini": _llm(GEMINI_MODEL, "OPENROUTER_API_KEY", OPENROUTER_BASE_URL, OPENROUTER_MAX_TOKENS),

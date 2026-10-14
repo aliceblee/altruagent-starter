@@ -4,12 +4,18 @@
 returns a small router that picks the right player the first time the
 runtime asks for a decision:
 
-- **Werewolf** -> `agent.werewolf.WerewolfAgent`: Bayesian role inference
-  over every possible role assignment, role-specific play (seer / wolf /
-  villager), and planned table talk. Decisions never depend on an LLM; if
-  `OPENAI_API_KEY` is set, an LLM only rewrites the planned chat messages
-  (disable with `WEREWOLF_LLM_CHAT=0`). Set `WEREWOLF_DEBUG=1` to log every
-  decision and the first private observation.
+- **Werewolf**, with `ANTHROPIC_API_KEY` set ->
+  `agent.werewolf.claude_brain.ClaudeWerewolfAgent`: Claude makes every
+  decision and writes every chat, following the team playbook
+  (`agent/werewolf/playbook.md`) and advised by the rule engine below, which
+  also plays whenever Claude fails or times out. `WEREWOLF_BRAIN=rules`
+  turns Claude off.
+- **Werewolf** otherwise -> `agent.werewolf.WerewolfAgent`: Bayesian role
+  inference over every possible role assignment, role-specific play (seer /
+  wolf / villager), and planned table talk. If `OPENAI_API_KEY` is set, an
+  LLM only rewrites the planned chat messages (disable with
+  `WEREWOLF_LLM_CHAT=0`). Set `WEREWOLF_DEBUG=1` to log every decision and
+  the first private observation.
 - **Any other game** -> `examples.llm_agent.LLMAgent` when `OPENAI_API_KEY`
   is set, otherwise the first legal action (which can't finish Pokémon or
   Red Alert; see GAMES.md).
@@ -52,8 +58,10 @@ MAX_CHARS = 1000  # the server's cap is 1024
 
 
 class Agent:
-    def __init__(self, *, delegate: Any = None, decision_log: DecisionLog | None = None) -> None:
+    def __init__(self, *, delegate: Any = None, decision_log: DecisionLog | None = None,
+                 brain: str | None = None) -> None:
         self._delegate: Any = delegate
+        self._brain = brain  # "claude" / "rules"; None: WEREWOLF_BRAIN, else Claude when ANTHROPIC_API_KEY is set
         self._decisions = decision_log or DecisionLog()
         self._context: DecisionContext | None = None
         self._chats_by_day: dict[Any, int] = {}
@@ -64,8 +72,12 @@ class Agent:
             if _is_werewolf(context):
                 from agent.werewolf import WerewolfAgent
                 from agent.werewolf.chat_llm import polisher_from_env
+                from agent.werewolf.claude_brain import claude_agent_from_env
 
-                self._delegate = WerewolfAgent(polish=polisher_from_env(), log=self._note)
+                if self._brain != "rules":
+                    self._delegate = claude_agent_from_env(log=self._note, brain=self._brain)
+                if self._delegate is None:
+                    self._delegate = WerewolfAgent(polish=polisher_from_env(), log=self._note)
             elif os.environ.get("OPENAI_API_KEY"):
                 from examples.llm_agent import create_agent as create_llm_agent
 
