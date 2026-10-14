@@ -190,10 +190,11 @@ def test_role_and_partner_come_from_the_night_actions_when_the_observation_is_un
     assert agent.choose_action(vote, ctx(2)).action_id != "0"  # Player0 is the inferred partner
 
 
-def test_seer_claims_when_it_found_a_wolf_and_messages_respect_limits():
+def test_seer_claims_its_found_wolf_on_day2_and_messages_respect_limits():
+    # (On day 1 the seer stays hidden; see the day-1 seer tests below.)
     agent = WerewolfAgent(rng=random.Random(0))
-    s = state(2, "Your role: seer. Night 1: you investigated Player4: wolf.", phase="messaging")
-    agent.choose_message(s, ctx(2))  # the day-1 opener
+    s = state(2, "Your role: seer. Night 1: you investigated Player4: wolf.", phase="messaging", day=2,
+              alive=[0, 1, 2, 3, 4, 5], dead=[{"player": "Player6", "role": "villager", "cause": "night_kill", "day": 2}])
     message = agent.choose_message(s, ctx(2))
     assert isinstance(message, SendMessage) and "Seer" in message.content and "Player4" in message.content
     assert len(message.content.split()) <= 45 and not message.recipients
@@ -839,3 +840,61 @@ def test_at_most_one_unison_call_out_a_day():
               dead=[])
     texts = [m.content for m in (agent.choose_message(s, ctx(6)) for _ in range(4)) if isinstance(m, SendMessage)]
     assert sum("in unison" in t for t in texts) == 1
+
+
+# -- the seer never reveals itself on day 1 ------------------------------------------------------
+
+SEER_FOUND_WOLF = "Your role: seer. Night 1: you investigated Player4: wolf."
+SEER_FOUND_VILLAGER = "Your role: seer. Night 1: you investigated Player4: villager."
+
+
+def _seer_day1_texts(observation, messages, calls=4):
+    agent = WerewolfAgent(rng=random.Random(0), polish=lambda text, facts: "POLISHED " + text)
+    s = state(2, observation, phase="messaging", messages=messages)
+    sent = [m for m in (agent.choose_message(s, ctx(2)) for _ in range(calls)) if isinstance(m, SendMessage)]
+    vote = agent.choose_action(state(2, observation, legal=[0, 1, 3, 4, 5, 6, 7]), ctx(2))
+    return agent, [m.content for m in sent], vote.action_id
+
+
+@pytest.mark.parametrize("observation", [SEER_FOUND_WOLF, SEER_FOUND_VILLAGER])
+def test_seer_answers_a_day1_rival_claim_with_the_sane_seer_line_and_never_claims(observation):
+    from agent.werewolf.agent import SANE_SEER_LINE
+    from agent.werewolf.parsing import _SEER_CLAIM
+
+    rival = [(5, "I am the Seer. I checked Player2: WOLF. Vote Player2.")]
+    agent, texts, vote = _seer_day1_texts(observation, rival)
+    assert SANE_SEER_LINE in texts  # word for word, not rewritten
+    assert not any(_SEER_CLAIM.search(t) for t in texts) and not agent._claimed_seer
+    assert vote == ("4" if "wolf." in observation else "5")  # found wolf, else the fake seer
+
+
+def test_seer_with_a_found_wolf_pushes_it_on_day1_without_claiming():
+    from agent.werewolf.parsing import _SEER_CLAIM
+
+    agent, texts, vote = _seer_day1_texts(SEER_FOUND_WOLF, [])
+    assert any("tells me it's Player4" in t for t in texts)
+    assert not any(_SEER_CLAIM.search(t) for t in texts) and vote == "4"
+
+
+def test_seer_under_pressure_on_day1_still_does_not_claim():
+    from agent.werewolf.parsing import _SEER_CLAIM
+
+    talk = [(1, "I'm voting Player2."), (3, "Player2 is a wolf, voting Player2."), (5, "Voting Player2 too.")]
+    agent, texts, _ = _seer_day1_texts(SEER_FOUND_WOLF, talk, calls=5)
+    assert not any(_SEER_CLAIM.search(t) for t in texts) and not agent._claimed_seer
+
+
+def test_seer_claims_on_day2_as_before():
+    agent = WerewolfAgent(rng=random.Random(0))
+    s = state(2, SEER_FOUND_WOLF, phase="messaging", day=2, alive=[0, 1, 2, 3, 4, 5],
+              dead=[{"player": "Player6", "role": "villager", "cause": "night_kill", "day": 2}])
+    texts = [m.content for m in (agent.choose_message(s, ctx(2)) for _ in range(3)) if isinstance(m, SendMessage)]
+    assert any(t.startswith("I am the Seer. My checks: Player4 = WOLF") for t in texts)
+
+
+def test_switching_seer_hides_day1_off_restores_the_day1_claim():
+    agent = WerewolfAgent(rng=random.Random(0))
+    agent.seer_hides_day1 = False
+    s = state(2, SEER_FOUND_WOLF, phase="messaging")
+    texts = [m.content for m in (agent.choose_message(s, ctx(2)) for _ in range(3)) if isinstance(m, SendMessage)]
+    assert any(t.startswith("I am the Seer. My checks: Player4 = WOLF") for t in texts)

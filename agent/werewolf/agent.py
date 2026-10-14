@@ -42,6 +42,10 @@ BANDWAGON_WEIGHT = 0.06  # per announced vote, when picking among near-equal sus
 STICKY_MARGIN = 0.12
 # Our first message of day 1, whatever our role. With an LLM configured it is rewritten
 # fresh each game (same joke, new wording); without one it is sent as is.
+# What our seer says on day 1 when someone else claims seer (sent word for word; the seer
+# itself never claims on day 1).
+SANE_SEER_LINE = ("Any sane seer would refrain from claiming their seer status on day 1 "
+                  "because that just makes them a target.")
 DAY1_OPENER = "I'm a vegetarian vampire villager Eddie Cullen. I hate werewolves. Raise your hand if you're werewolf?"
 
 
@@ -53,6 +57,10 @@ class WerewolfAgent:
     # Strategy switches (also used by the simulator for ablations).
     counter_claim = "self"  # True: when either wolf is outed; "self": only when I am; False: never
     seer_claim_day = 2  # claim on this day at the latest, even without a wolf found
+    # Never reveal ourselves as the seer on day 1 (team decision). Simulator cost, 6000 games:
+    # seer win rate vs heuristic tables 56.8% -> 48.2%, self-play village 51.8% -> 31.2%,
+    # because a wolf found on night 1 is no longer claimed and voted out on day 1.
+    seer_hides_day1 = True
     rescue = True  # rally the table onto our top suspect when votes pile up on us
     call_out_unison = True  # villager/seer: point out two players pushing the same target in unison
     # Wolf play.
@@ -158,7 +166,7 @@ class WerewolfAgent:
             self._done_today = True
             return TERMINATE_MESSAGING
         text, facts = plan
-        if self.polish is not None:
+        if self.polish is not None and not facts.get("verbatim"):
             try:
                 text = self.polish(text, {**facts, "voice": self._voice}) or text
             except Exception as exc:  # noqa: BLE001 - never let chat polish break the game
@@ -454,6 +462,12 @@ class WerewolfAgent:
         pressured = len(self._accusers_of(snap, snap.me)) >= 2
         should_claim = found_wolf or rival or pressured or snap.day >= self.seer_claim_day or len(living) <= 4
         target = self._village_vote(snap, snap.living_others())
+        if snap.day <= 1 and self.seer_hides_day1:
+            # Never reveal ourselves on day 1, whatever happens: a day-1 seer is the night's kill.
+            should_claim = False
+            line = self._seer_day1(snap, rival, found_wolf)
+            if line is not None:
+                return line
 
         if should_claim and ("claim" not in self._said or (rival and not self._reacted_claims >= set(rival))):
             self._said |= {"claim", "opening"}
@@ -622,6 +636,18 @@ class WerewolfAgent:
             self._claim_busted = True
             self.log(f"[werewolf] P{snap.me}: fake seer claim disproved, dropping it")
 
+    def _seer_day1(self, snap: Snapshot, rival: list[int], found_wolf: bool) -> tuple[str, dict] | None:
+        """Day 1 as the seer, staying hidden. Someone else claiming seer gets SANE_SEER_LINE;
+        a wolf we found is pushed under cover of the psychic pick, so we still vote it."""
+        if rival and "sane_seer" not in self._said:
+            self._said.add("sane_seer")
+            return SANE_SEER_LINE, {"intent": "seer_hint", "verbatim": True}
+        if "opening" in self._said:
+            return None
+        self._said.add("opening")
+        wolves = [t for t, v in snap.seer_results.items() if v == WOLF and t in snap.alive]
+        return self._day1_line(snap, pick=wolves[0] if wolves else None)
+
     def _uses_day1_lines(self, snap: Snapshot) -> bool:
         """Villagers, and a seer that has found no wolf (it isn't claiming yet), on day 1."""
         if not self._no_hard_info(snap):
@@ -647,7 +673,7 @@ class WerewolfAgent:
         (Announced votes and accusations are talk, not information.)"""
         return snap.day <= 1 and not self.chat.seer_claims and not snap.dead and not snap.votes
 
-    def _day1_line(self, snap: Snapshot) -> tuple[str, dict] | None:
+    def _day1_line(self, snap: Snapshot, pick: int | None = None) -> tuple[str, dict] | None:
         """A villager on day 1 with nothing to go on. A lynch beats no lynch by a wide
         margin (about 23% vs 8% village wins with no information at all), so always
         give the table one target: fight back against a vote on us, else join the
@@ -675,6 +701,12 @@ class WerewolfAgent:
                     "I think you're the werewolf.", {"intent": "vote", "vote": accuser})
         if self._announced_target is not None:
             return None
+        if pick is not None:  # the seer's found wolf, disguised as a hunch
+            self._announced_target = pick
+            self._psychic_pick_day = snap.day
+            return (f"No hard info yet since the seer can't share anything yet. My vampiric psychic ability tells me "
+                    f"it's {_p(pick)}, something about their reasoning. We should vote to avoid a split.",
+                    {"intent": "vote", "vote": pick, "psychic": True})
         backers: dict[int, list[int]] = {}
         for voter, t in intents.items():  # in the order they were announced
             if t != snap.me and t not in cleared:
