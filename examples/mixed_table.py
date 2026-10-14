@@ -14,7 +14,7 @@ Brains (names usable in ``SEATS``):
   when ``ANTHROPIC_API_KEY`` is set, else the rule engine).
 - ``ours_rules`` / ``ours_claude``: the real agent forced onto the rule engine /
   the Claude brain, to compare the two at one table.
-- ``openai``, ``openai_sol``, ``claude``, ``claude_sonnet``, ``gemini``,
+- ``openai``, ``openai_sol``, ``openai_61``, ``claude``, ``claude_sonnet``, ``gemini``,
   ``deepseek``, ``mistral``: the stock ``examples.llm_agent`` LLMAgent on
   another model. The ``openai*`` ones use ``OPENAI_API_KEY`` directly; the
   others go through OpenRouter with ``OPENROUTER_API_KEY``.
@@ -29,7 +29,9 @@ Brains (names usable in ``SEATS``):
 Every brain is wrapped in a safety net: if it raises or returns something
 that isn't a legal move, the seat plays a legal fallback (abstain by day,
 the first legal target at night) or ends its chat, so a dummy never crashes
-its seat. Keys are read from the environment (the starter's ``.env`` is
+its seat. Every seat that isn't ``ours`` writes what it hears, says and votes (with the
+model's stated reason) to ``logs/decisions/<session>/seat<N>.jsonl``, the same format our
+agent uses, so a whole game can be reviewed. Keys are read from the environment (the starter's ``.env`` is
 loaded by ``load_dotenv``) and never printed.
 """
 
@@ -47,7 +49,7 @@ from altruagent import TERMINATE_MESSAGING, DecisionContext, GameState, LegalAct
 
 SEATS: dict[int, str] = {
     0: "ours",
-    1: "ours",
+    1: "openai_61",
     2: "openai",
     3: "claude",
     4: "gemini",
@@ -58,6 +60,7 @@ UNLISTED_SEAT = "random"  # any seat missing from SEATS
 
 OPENAI_MODEL = "gpt-6-luna"  # cheap OpenAI tier
 OPENAI_SOL_MODEL = "gpt-6-sol"  # stronger OpenAI tier
+OPENAI_61_MODEL = "gpt-6.1-sol"  # newest OpenAI model
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 CLAUDE_MODEL = "anthropic/claude-haiku-5.5"  # OpenRouter ids, checked against /api/v1/models
 CLAUDE_SONNET_MODEL = "anthropic/claude-sonnet-5.5"
@@ -68,6 +71,9 @@ INJECT_TARGET = 0  # the seat the injector tries to get voted out (one of ours b
 # OpenRouter reserves credit for a reply's max_tokens, and some models default to 65k,
 # which a small balance can't cover (HTTP 402). Answers here are short JSON.
 OPENROUTER_MAX_TOKENS = 2000
+# The stock LLM agent asks its model at most 2 times per discussion round, so a table of
+# LLM seats goes quiet within seconds. The server allows 5 chats a day.
+LLM_MESSAGES_PER_ROUND = 4
 
 # --------------------------------------------------------------------------------------------
 
@@ -209,9 +215,12 @@ def _llm(model: str, key_env: str, base_url: str | None = None, max_tokens: int 
         if not api_key:
             _log(seat, f"{key_env} is not set; playing 'random' instead of {model}")
             return RandomBrain()
+        import examples.llm_agent as llm_agent
         from examples.llm.providers import DEFAULT_OPENAI_BASE_URL, OpenAIProvider
         from examples.llm_agent import LLMAgent
 
+        # Read by LLMAgent at call time; each seat is its own process, so this stays in this seat.
+        llm_agent.MESSAGE_REQUESTS_PER_ROUND = LLM_MESSAGES_PER_ROUND
         provider = OpenAIProvider(api_key, model, base_url=base_url or DEFAULT_OPENAI_BASE_URL)
         if max_tokens is not None:
             _cap_max_tokens(provider, max_tokens)
@@ -244,6 +253,7 @@ BRAINS: dict[str, Callable[[Any], Any]] = {
     "ours_claude": lambda seat: _ours(seat, "claude"),
     "openai": _llm(OPENAI_MODEL, "OPENAI_API_KEY"),
     "openai_sol": _llm(OPENAI_SOL_MODEL, "OPENAI_API_KEY"),
+    "openai_61": _llm(OPENAI_61_MODEL, "OPENAI_API_KEY"),
     "claude": _llm(CLAUDE_MODEL, "OPENROUTER_API_KEY", OPENROUTER_BASE_URL, OPENROUTER_MAX_TOKENS),
     "claude_sonnet": _llm(CLAUDE_SONNET_MODEL, "OPENROUTER_API_KEY", OPENROUTER_BASE_URL, OPENROUTER_MAX_TOKENS),
     "gemini": _llm(GEMINI_MODEL, "OPENROUTER_API_KEY", OPENROUTER_BASE_URL, OPENROUTER_MAX_TOKENS),
@@ -272,6 +282,11 @@ def _legal(decision: Any, state: GameState) -> LegalAction | None:
     return next((a for a in state.legal_actions if a.action_id == inner), None)
 
 
+def _game(state: GameState) -> dict:
+    raw = state.raw if isinstance(state.raw, dict) else {}
+    return raw.get("game_state") if isinstance(raw.get("game_state"), dict) else {}
+
+
 def _fallback(state: GameState) -> LegalAction:
     return next((a for a in state.legal_actions if a.action_id == ABSTAIN), state.legal_actions[0])
 
@@ -284,6 +299,8 @@ class Mixed:
         self._brains = BRAINS if brains is None else brains
         self._brain: Any = None
         self.name: str | None = None
+        self._record: Any = None  # DecisionLog for non-"ours" seats ("ours" logs on its own)
+        self._heard: set[int] = set()
 
     def _inner(self, context: DecisionContext) -> Any:
         if self._brain is None:
@@ -295,36 +312,80 @@ class Mixed:
                 _log(seat, f"couldn't build {self.name!r} ({type(exc).__name__}: {exc}); playing 'random'")
                 self.name, self._brain = "random", RandomBrain()
             _log(seat, f"playing as {self.name}")
+            if not self.name.startswith("ours"):
+                try:
+                    from agent.decision_log import DecisionLog
+
+                    self._record = DecisionLog()
+                    self._write(context, "note", text=f"[mixed] seat{seat} playing as {self.name}")
+                except Exception as exc:  # noqa: BLE001 - logging must never cost the seat
+                    _log(seat, f"decision log unavailable: {exc!r}")
         return self._brain
+
+    def _write(self, context: DecisionContext, kind: str, **fields: Any) -> None:
+        """Same per-seat JSONL files and record kinds as our agent's router, so whole games can be reviewed."""
+        if self._record is not None:
+            self._record.write(context, kind, brain=self.name, **fields)
+
+    def _hear(self, state: GameState, context: DecisionContext) -> None:
+        day = _game(state).get("day")
+        for m in state.new_messages:
+            if m.index not in self._heard and m.type == "chat":
+                self._heard.add(m.index)
+                self._write(context, "heard", day=day, seq=m.index, sender=m.sender,
+                            recipients=list(m.recipients), content=m.content)
 
     def choose_action(self, state: GameState, context: DecisionContext):
         brain = self._inner(context)
+        self._hear(state, context)
+        decision, problem = None, None
         try:
             decision = brain.choose_action(state, context)
-            if _legal(decision, state) is not None:
-                return decision
-            problem = f"returned {decision!r}, not a legal action"
+            if _legal(decision, state) is None:
+                problem = f"returned {decision!r}, not a legal action"
         except Exception as exc:  # noqa: BLE001 - the safety net
             problem = f"{type(exc).__name__}: {exc}"
-        _log(context.seat_position, f"{self.name} FALLBACK move: {problem}")
-        return _fallback(state)
+        if problem is not None:
+            _log(context.seat_position, f"{self.name} FALLBACK move: {problem}")
+            decision = _fallback(state)
+        action = _legal(decision, state)
+        game = _game(state)
+        self._write(
+            context, "action", day=game.get("day"), sub_phase=game.get("phase"),
+            action_id=action.action_id, label=action.label,
+            reasoning=getattr(decision, "reasoning_summary", None),
+            source="fallback" if problem else "agent", error=problem, observation=state.observation,
+        )
+        return decision
 
     def choose_message(self, state: GameState, context: DecisionContext):
         brain = self._inner(context)
+        self._hear(state, context)
         method = getattr(brain, "choose_message", None)
-        if method is None:
-            return TERMINATE_MESSAGING
-        try:
-            decision = method(state, context)
-            if decision is TERMINATE_MESSAGING or (isinstance(decision, SendMessage) and str(decision.content or "").strip()):
-                return decision
-            problem = f"returned {decision!r}"
-        except Exception as exc:  # noqa: BLE001 - the safety net
-            problem = f"{type(exc).__name__}: {exc}"
-        _log(context.seat_position, f"{self.name} FALLBACK message (ending chat): {problem}")
-        return TERMINATE_MESSAGING
+        decision, problem = TERMINATE_MESSAGING, None
+        if method is not None:
+            try:
+                decision = method(state, context)
+                if not (decision is TERMINATE_MESSAGING
+                        or (isinstance(decision, SendMessage) and str(decision.content or "").strip())):
+                    problem = f"returned {decision!r}"
+            except Exception as exc:  # noqa: BLE001 - the safety net
+                problem = f"{type(exc).__name__}: {exc}"
+        if problem is not None:
+            _log(context.seat_position, f"{self.name} FALLBACK message (ending chat): {problem}")
+            decision = TERMINATE_MESSAGING
+        game = _game(state)
+        self._write(
+            context, "message", day=game.get("day"), seconds_left=(state.raw or {}).get("messaging_seconds_left"),
+            type="chat" if isinstance(decision, SendMessage) else "terminate",
+            content=getattr(decision, "content", None), recipients=getattr(decision, "recipients", None),
+            source="fallback" if problem else "agent", error=problem,
+        )
+        return decision
 
     def on_action_result(self, result: dict, context: DecisionContext) -> None:
+        self._write(context, "action_result", accepted=result.get("accepted"),
+                    error=result.get("error"), detail=result.get("detail"))
         method = getattr(self._brain, "on_action_result", None)
         if method is None:
             return
