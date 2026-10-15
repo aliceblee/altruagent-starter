@@ -301,6 +301,7 @@ class Mixed:
         self.name: str | None = None
         self._record: Any = None  # DecisionLog for non-"ours" seats ("ours" logs on its own)
         self._heard: set[int] = set()
+        self._memory: Any = None  # GameMemory for non-"ours" seats ("ours" keeps its own)
 
     def _inner(self, context: DecisionContext) -> Any:
         if self._brain is None:
@@ -316,7 +317,10 @@ class Mixed:
                 try:
                     from agent.decision_log import DecisionLog
 
+                    from agent.game_memory import GameMemory
+
                     self._record = DecisionLog()
+                    self._memory = GameMemory()
                     self._write(context, "note", text=f"[mixed] seat{seat} playing as {self.name}")
                 except Exception as exc:  # noqa: BLE001 - logging must never cost the seat
                     _log(seat, f"decision log unavailable: {exc!r}")
@@ -328,6 +332,8 @@ class Mixed:
             self._record.write(context, kind, brain=self.name, **fields)
 
     def _hear(self, state: GameState, context: DecisionContext) -> None:
+        if self._memory is not None:
+            self._memory.observe(state, context)
         day = _game(state).get("day")
         for m in state.new_messages:
             if m.index not in self._heard and m.type == "chat":
@@ -393,6 +399,18 @@ class Mixed:
             method(result, context)
         except Exception as exc:  # noqa: BLE001
             _log(context.seat_position, f"{self.name} on_action_result failed: {type(exc).__name__}: {exc}")
+
+
+    def on_game_end(self, final_state: Any, context: DecisionContext, outcome: str | None) -> None:
+        """Every seat saves its record for cross-game memory, labelled with the brain that played it."""
+        method = getattr(self._brain, "on_game_end", None)
+        try:
+            if method is not None:
+                method(final_state, context, outcome)  # "ours": our router records itself
+            elif self._memory is not None:
+                self._memory.finish(final_state, context, outcome, agent=self.name or UNLISTED_SEAT)
+        except Exception as exc:  # noqa: BLE001
+            _log(context.seat_position, f"{self.name} on_game_end failed: {type(exc).__name__}: {exc}")
 
 
 def create_agent() -> Mixed:

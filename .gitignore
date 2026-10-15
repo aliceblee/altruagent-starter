@@ -35,3 +35,6 @@ recordings/
 
 # Per-match decision logs (agent/decision_log.py)
 logs/
+
+# Cross-game memory records (agent/game_memory.py)
+memory/

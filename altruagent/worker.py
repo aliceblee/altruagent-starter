@@ -213,6 +213,19 @@ def game_outcome(final_state, agent_id: str) -> str | None:
     return "won" if score > 0.5 else "lost" if score < 0.5 else "drew"
 
 
+def _report_game_end(contestant, final_state, context, outcome, print_line, label: str) -> None:
+    """An optional ``on_game_end(final_state, context, outcome)`` on the agent object, called once
+    after the game ends (``outcome`` as in ``game_outcome``). It can't affect the game, so a hook
+    that raises is reported and otherwise ignored."""
+    method = getattr(contestant, "on_game_end", None)
+    if not callable(method):
+        return
+    try:
+        method(final_state, context, outcome)
+    except Exception as exc:  # noqa: BLE001 - the game is over; never fail the worker for this
+        print_line(f"{label} on_game_end raised {exc!r}")
+
+
 def finished_line(final_state, agent_id: str, seat_position: int | None = None) -> str:
     """The worker's last line for a game that ended: how this agent did, when
     the server said, then the technical detail. For example
@@ -371,6 +384,7 @@ def run_tournament_worker(
             seat_position=grant.seat_position,
         )
         final_state = run_game_fn(game, context, contestant)
+        _report_game_end(contestant, final_state, context, game_outcome(final_state, grant.agent_id), print_line, label)
         print_line(f"{label} {finished_line(final_state, grant.agent_id, grant.seat_position)}")
         return EXIT_SUCCESS
     except KeyboardInterrupt:

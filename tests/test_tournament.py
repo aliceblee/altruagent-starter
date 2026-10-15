@@ -1729,3 +1729,26 @@ def test_after_a_refused_key_no_new_game_is_started_and_it_is_said_once():
     h.tick()
     assert h.log[-1] == "Match finished."  # not "Waiting for your next game...": none will start
     assert WAITING_MESSAGE not in h.log
+
+
+def test_worker_tells_the_agent_the_game_ended_and_how_it_went(capsys):
+    calls = []
+
+    def fake_run_game(game, context, contestant):
+        contestant.on_game_end = lambda final, ctx, outcome: calls.append((final.termination_reason, ctx.seat_position, outcome))
+        return types.SimpleNamespace(termination_reason="completed", returns={"synthetic-1": 1.0})
+
+    code, _, _ = _worker(run_game_fn=fake_run_game)
+    assert code == EXIT_SUCCESS and calls == [("completed", 1, "won")]
+
+
+def test_a_failing_on_game_end_does_not_fail_the_worker(capsys):
+    def fake_run_game(game, context, contestant):
+        def boom(final, ctx, outcome):
+            raise RuntimeError("disk full")
+        contestant.on_game_end = boom
+        return types.SimpleNamespace(termination_reason="completed", returns={"synthetic-1": 1.0})
+
+    code, _, _ = _worker(run_game_fn=fake_run_game)
+    out = capsys.readouterr().out
+    assert code == EXIT_SUCCESS and "on_game_end raised" in out and "finished: your agent" in out

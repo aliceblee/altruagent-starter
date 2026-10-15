@@ -50,6 +50,7 @@ from dotenv import load_dotenv
 
 from altruagent import TERMINATE_MESSAGING, DecisionContext, GameState, LegalAction, SendMessage, WithReasoning
 from agent.decision_log import DecisionLog
+from agent.game_memory import GameMemory
 
 ABSTAIN = "7"
 MAX_CHATS_PER_DAY = 5  # the server's limit
@@ -59,10 +60,11 @@ MAX_CHARS = 1000  # the server's cap is 1024
 
 class Agent:
     def __init__(self, *, delegate: Any = None, decision_log: DecisionLog | None = None,
-                 brain: str | None = None) -> None:
+                 brain: str | None = None, memory: GameMemory | None = None) -> None:
         self._delegate: Any = delegate
         self._brain = brain  # "claude" / "rules"; None: WEREWOLF_BRAIN, else Claude when ANTHROPIC_API_KEY is set
         self._decisions = decision_log or DecisionLog()
+        self._memory = memory or GameMemory()
         self._context: DecisionContext | None = None
         self._chats_by_day: dict[Any, int] = {}
         self._heard: set[int] = set()
@@ -91,6 +93,7 @@ class Agent:
         if not _is_werewolf(context):
             return player.choose_action(state, context)
         self._context = context
+        self._memory.observe(state, context)
         started = time.monotonic()
         error = None
         try:
@@ -117,6 +120,7 @@ class Agent:
         if not _is_werewolf(context):
             return method(state, context)
         self._context = context
+        self._memory.observe(state, context)
         started = time.monotonic()
         day = _day(state)
         for heard in state.new_messages:
@@ -152,6 +156,12 @@ class Agent:
         method = getattr(self._delegate, "on_action_result", None)
         if method is not None:
             method(result, context)
+
+    def on_game_end(self, final_state: Any, context: DecisionContext, outcome: str | None) -> None:
+        """Werewolf: save this seat's record of the game for cross-game memory (agent/game_memory.py)."""
+        if _is_werewolf(context):
+            brain = "claude" if type(self._delegate).__name__ == "ClaudeWerewolfAgent" else "rules"
+            self._memory.finish(final_state, context, outcome, agent=f"ours:{brain}")
 
     def _note(self, message: str) -> None:
         """WerewolfAgent's own log lines: printed with WEREWOLF_DEBUG=1, always kept in the decision log."""
