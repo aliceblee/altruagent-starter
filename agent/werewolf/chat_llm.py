@@ -68,9 +68,6 @@ def make_polisher(provider: Any, log: Callable[[str], None] = lambda _m: None) -
         if _SEER_CLAIM.search(text) and not _SEER_CLAIM.search(draft):
             log("[werewolf] polish rejected: invented a seer claim")
             return draft
-        if facts.get("psychic") and "psychic" not in text.lower():
-            log("[werewolf] polish rejected: dropped the psychic pick wording")
-            return draft
         if facts.get("intent") == "seer_claim" and not _SEER_CLAIM.search(text):
             log("[werewolf] polish rejected: dropped the seer claim")
             return draft

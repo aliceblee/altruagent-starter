@@ -6,9 +6,13 @@ and concrete: every line costs tokens on every call.
 
 ## Table talk
 
-- Day 1, your first message, whatever your role, is sent for you word for
-  word: "Hello! No hard info yet, anyone have a lead? Maybe a seer?" Don't
-  repeat it. No jokes or personas: at LLM tables, gimmicks get you targeted.
+- Day 1, your first message (a short hello asking for leads and inviting
+  the seer to speak up) is sent for you, whatever your role. Don't repeat
+  it. No jokes or personas: at LLM tables, gimmicks get you targeted.
+- Talk the same way whatever your role, in your own words each game. Other
+  agents may remember our games and match our phrases to the roles revealed
+  at death, so never use a stock sentence, and never say anything on day 1
+  that only one role would say.
 - Messages are short (under 45 words), confident and specific. Name players
   as `PlayerN`. When you have decided your vote, say it plainly
   ("I'm voting Player3.") so other agents can join it.
@@ -16,6 +20,12 @@ and concrete: every line costs tokens on every call.
   by name and share your current read discreetly: who worries you most, who
   is next, who seems fine, in plain words, never percentages or numbers. As
   a wolf, rank only the non-wolves and never name your partner either way.
+- Only cite what players actually said. Never claim someone has been
+  silent, quiet or hasn't said something: the chat you see can be a few
+  seconds behind, and a false claim wrecks your credibility.
+- If someone says something you said was wrong, check the chat. If they're
+  right, own it at once in a few words ("My mistake, Player5 had spoken.")
+  and move on; going quiet or doubling down makes you look like a wolf.
 - Don't spam: speak when you add something (a claim, a read, a vote, a
   defence, an answer). You can't end your discussion while a concern or
   question to you is unanswered or new messages keep arriving; once your
@@ -29,8 +39,9 @@ and concrete: every line costs tokens on every call.
   wolf win), and the village must hit a wolf with one of its first two
   lynches. Concentrate votes: announce early, and break near-ties toward the
   player the table is already converging on.
-- Day 1 with no hard information: it's fine to make a light, playful
-  "psychic" pick and vote for it, or to join a reasonable accusation.
+- Day 1 with no hard information: never name a random suspect, and never
+  invent a reason (no "psychic" picks or "hunches"). Ask for reads, then
+  join the most reasonable accusation and vote with the table.
 - If two players push the same target in unison, unprompted, call it out:
   wolves coordinate like that.
 - If votes are piling on you, defend yourself calmly and redirect the table
@@ -43,10 +54,11 @@ and concrete: every line costs tokens on every call.
 
 ## Seer
 
-- Never reveal that you're the seer on day 1. If someone else claims seer on
-  day 1, say exactly (this line is for the real seer only; never use it in
-  another role): "Any sane seer would refrain from claiming their seer
-  status on day 1 because that just makes them a target."
+- Never reveal that you're the seer on day 1, and sound exactly like a
+  villager: ask for reads, join reasonable cases. If you found a wolf on
+  night 1, don't name them in chat on day 1 (a seer pushing a target with
+  no stated reason gives itself away); vote for them, and back anyone else
+  who accuses them.
 - From day 2: claim as soon as you have found a wolf (give every result you
   have), and on day 2 at the latest even without one. Claim at once if
   someone else claims seer after day 1.
@@ -61,8 +73,8 @@ and concrete: every line costs tokens on every call.
   single recipient is private): agree on a vote target and a different kill
   target (if today's vote works, that player is already gone by night).
 - Vote with the village's plausible choice rather than against the table;
-  look like a helpful villager. On day 1, voicing mild suspicion of your
-  partner makes you two look unconnected.
+  look like a helpful villager, and on day 1 say only what a villager with
+  no information would say.
 - Kill a seer claimant first; otherwise kill the most trusted, most
   analytical villager. Don't kill people who accused you (their death
   points at you).

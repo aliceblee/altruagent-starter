@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import random
+import re
 from pathlib import Path
 
 import pytest
@@ -293,19 +294,45 @@ def test_snapshot_reads_recorded_platform_states(case):
     "Your role: seer. Night 1: you investigated Player4: wolf.",
     "Your role: wolf. Your fellow wolf is Player0.",
 ])
-def test_day1_first_message_is_the_eddie_cullen_opener_for_every_role(observation):
-    from agent.werewolf.agent import DAY1_OPENER
+def test_day1_first_message_is_a_shared_opener_for_every_role(observation):
+    from agent.werewolf.agent import DAY1_OPENERS
 
     agent = WerewolfAgent(rng=random.Random(0))  # no LLM: the line as written
     s = state(2, observation, phase="messaging")
     first = agent.choose_message(s, ctx(2))
-    assert isinstance(first, SendMessage) and first.content == DAY1_OPENER and not first.recipients
+    assert isinstance(first, SendMessage) and first.content in DAY1_OPENERS and not first.recipients
     second = agent.choose_message(s, ctx(2))
-    assert not (isinstance(second, SendMessage) and second.content == DAY1_OPENER)
+    assert not (isinstance(second, SendMessage) and second.content in DAY1_OPENERS)
+
+
+def test_the_opener_varies_from_game_to_game():
+    from agent.werewolf.agent import DAY1_OPENERS
+
+    openers = {WerewolfAgent(rng=random.Random(i)).choose_message(state(2, "Your role: villager.", phase="messaging"),
+                                                                 ctx(2)).content for i in range(20)}
+    assert len(openers) >= 3 and openers <= set(DAY1_OPENERS)
+    assert all("seer" in o.lower() for o in DAY1_OPENERS)  # every one invites the seer to speak up
+
+
+@pytest.mark.parametrize("observation", [
+    "Your role: villager.",
+    "Your role: seer. Night 1: you investigated Player4: wolf.",
+    "Your role: seer. Night 1: you investigated Player4: villager.",
+    "Your role: wolf. Your fellow wolf is Player0.",
+])
+def test_day1_with_nothing_to_go_on_every_role_says_the_same_things(observation):
+    # Other agents may keep notes across games: no day-1 sentence of ours may belong to one role.
+    from agent.werewolf.agent import DAY1_ASKS, DAY1_OPENERS
+
+    agent = WerewolfAgent(rng=random.Random(0))
+    s = state(2, observation, phase="messaging")
+    texts = [m.content for m in (agent.choose_message(s, ctx(2)) for _ in range(4))
+             if isinstance(m, SendMessage) and not m.recipients]
+    assert texts and all(t in DAY1_OPENERS + DAY1_ASKS for t in texts)
 
 
 def test_day1_opener_is_sent_word_for_word_even_with_an_llm():
-    from agent.werewolf.agent import DAY1_OPENER
+    from agent.werewolf.agent import DAY1_OPENERS
 
     seen = []
 
@@ -315,18 +342,18 @@ def test_day1_opener_is_sent_word_for_word_even_with_an_llm():
 
     agent = WerewolfAgent(rng=random.Random(0), polish=polish)
     first = agent.choose_message(state(2, "Your role: villager.", phase="messaging"), ctx(2))
-    assert first.content == DAY1_OPENER == "Hello! No hard info yet, anyone have a lead? Maybe a seer?"
+    assert first.content in DAY1_OPENERS
     assert seen == []
 
 
 def test_a_failing_llm_falls_back_to_the_written_opener():
-    from agent.werewolf.agent import DAY1_OPENER
+    from agent.werewolf.agent import DAY1_OPENERS
 
     def broken(text, facts):
         raise RuntimeError("HTTP 429")
 
     agent = WerewolfAgent(rng=random.Random(0), polish=broken)
-    assert agent.choose_message(state(2, "Your role: villager.", phase="messaging"), ctx(2)).content == DAY1_OPENER
+    assert agent.choose_message(state(2, "Your role: villager.", phase="messaging"), ctx(2)).content in DAY1_OPENERS
 
 
 @pytest.mark.parametrize("rewrite", [
@@ -334,10 +361,10 @@ def test_a_failing_llm_falls_back_to_the_written_opener():
     "Vegetarian vampire here. Player3, raise your hand!",  # names a player
 ])
 def test_opener_rewrites_that_break_the_rules_are_rejected(rewrite):
-    from agent.werewolf.agent import DAY1_OPENER
+    from agent.werewolf.agent import DAY1_OPENERS
 
-    out = make_polisher(FakeProvider(rewrite))(DAY1_OPENER, {"intent": "opener"})
-    assert out == DAY1_OPENER
+    out = make_polisher(FakeProvider(rewrite))(DAY1_OPENERS[0], {"intent": "opener"})
+    assert out == DAY1_OPENERS[0]
 
 
 def test_the_opener_is_sent_only_on_day_1():
@@ -506,10 +533,11 @@ def test_wolf_spreads_its_vote_when_the_lynch_is_already_decided():
     assert agent.choose_action(vote, ctx(0)).action_id not in ("4", "1", "7")
 
 
-def test_wolf_voices_mild_doubt_about_its_partner_on_day_1():
+def test_wolf_never_names_its_partner_on_day_1_by_default():
+    # A fixed "PlayerX seems a little suspicious" that only our wolves say would point at the other wolf.
     agent = WerewolfAgent(rng=random.Random(0))
     texts = [m.content for m in _talk(agent, 0, WOLF_OBS, []) if not m.recipients]
-    assert any("Player1 seems a little suspicious" in t for t in texts)
+    assert texts and not any("Player1" in t for t in texts)
 
 
 @pytest.mark.parametrize("text, kill", [
@@ -607,30 +635,13 @@ def _villager_day1(messages, seed=0):
     return [m.content for m in sent[1:]], vote.action_id  # skip the opener
 
 
-def test_day1_nobody_voted_yet_names_a_psychic_pick_and_votes_it():
+def test_day1_nobody_voted_yet_asks_for_reads_without_naming_a_random_suspect():
     texts, vote = _villager_day1([])
-    pick = int(texts[0].split("tells me it's Player")[1][0])
-    assert texts[0] == (f"No hard info yet, so a psychic hunch tells me it's Player{pick}, something about their "
-                        f"reasoning. Let's vote together to avoid a split.")
-    assert vote == str(pick) and pick != 6
+    assert texts == ["No leads yet. Who's your top suspect, and why? I'll back the strongest case so we don't split."]
+    assert vote not in ("6", "7")  # still never abstains
     facts = ChatFacts()
-    read_message(facts, 6, texts[0], [], 1, 0, RESOLVER)  # other agents read it as a vote
-    assert facts.intents_on(1) == {6: pick}
-
-
-def test_day1_psychic_pick_varies_by_game_but_is_shared_within_one():
-    def pick(session, seat):
-        agent = WerewolfAgent(rng=random.Random(seat))
-        c = DecisionContext(session_id=session, tournament_id=None, game_type="werewolf", agent_id="a", seat_position=seat)
-        s = state(seat, "Your role: villager.", phase="messaging")
-        agent.choose_message(s, c)
-        agent.choose_message(s, c)
-        return agent._announced_target
-
-    across_games = {pick(f"game-{i}", 6) for i in range(12)}
-    assert len(across_games) >= 3  # not always the lowest seat
-    same_game = {pick("game-x", seat) for seat in range(7)}
-    assert len(same_game) <= 2  # everyone agrees, except the picked player (who takes the next seat)
+    read_message(facts, 6, texts[0], [], 1, 0, RESOLVER)
+    assert facts.intents_on(1) == {}  # not a vote on anyone
 
 
 def test_day1_a_vote_on_me_gets_called_out_and_voted():
@@ -645,10 +656,10 @@ def test_day1_joins_the_leading_announced_vote():
     assert vote == "3"
 
 
-def test_day1_a_credible_seer_claim_still_overrides_the_psychic_pick():
+def test_day1_a_credible_seer_claim_decides_the_vote():
     agent = WerewolfAgent(rng=random.Random(0))
     agent.choose_message(state(6, "Your role: villager.", phase="messaging"), ctx(6))
-    agent.choose_message(state(6, "Your role: villager.", phase="messaging"), ctx(6))  # psychic pick
+    agent.choose_message(state(6, "Your role: villager.", phase="messaging"), ctx(6))  # asks for reads
     seer = state(6, "Your role: villager.", phase="messaging",
                  messages=[(2, "I am the Seer. My checks: Player4 = WOLF. I'm voting Player4.")])
     agent.choose_message(seer, ctx(6))
@@ -664,8 +675,9 @@ def test_an_announced_vote_sticks_through_small_wobbles():
     agent = WerewolfAgent(rng=random.Random(0))
     obs = "Your role: villager."
     agent.choose_message(state(6, obs, phase="messaging"), ctx(6))
-    agent.choose_message(state(6, obs, phase="messaging"), ctx(6))
+    agent.choose_message(state(6, obs, phase="messaging", messages=[(1, "I'm voting Player3.")]), ctx(6))
     announced = agent._announced_target
+    assert announced == 3
     noise = [(1, "Player2 seems a bit off."), (3, "I trust Player4."), (5, "Player0 is quiet.")]
     for _ in range(3):
         agent.choose_message(state(6, obs, phase="messaging", messages=noise), ctx(6))
@@ -769,7 +781,7 @@ def test_wolf_does_not_echo_its_partners_push_in_unison():
              if isinstance(m, SendMessage) and not m.recipients]
     facts = _facts([(1, "I'm voting Player3, they seem off.")] + [(0, t) for t in texts], me=5)
     assert facts.unison == []
-    assert any("joining Player1's vote on Player3" in t for t in texts)
+    assert any(re.search(r"(?:joining|backing) player1\b.*player3", t, re.I) for t in texts)
 
 
 # -- regressions from Testing games b4bdb262 (mixed, other teams in seats 3-6) and fd2e7047 -------
@@ -819,17 +831,6 @@ def test_villager_answers_a_credible_seer_who_pushed_it_with_support():
     assert (2, 0) not in {(a, b) for a, b, _ in heard.accusations}
 
 
-def test_dropping_a_psychic_pick_for_a_seer_claim_is_explained():
-    agent = WerewolfAgent(rng=random.Random(0))
-    s = state(1, "Your role: villager.", phase="messaging")
-    agent.choose_message(s, ctx(1))
-    agent.choose_message(s, ctx(1))  # psychic pick
-    claim = state(1, "Your role: villager.", phase="messaging",
-                  messages=[(0, "I am the Seer. My checks: Player6 = WOLF. I'm voting Player6.")])
-    texts = [m.content for m in (agent.choose_message(claim, ctx(1)) for _ in range(2)) if isinstance(m, SendMessage)]
-    assert any(t.startswith("Dropping my psychic guess now that Player0 has claimed seer") and "Player6" in t for t in texts)
-
-
 def test_backing_someones_vote_is_following_not_unison():
     facts = _facts([(3, "I'm voting Player0."), (5, "I'm backing Player3's vote on Player0 to keep us united.")])
     assert facts.unison == []
@@ -859,23 +860,29 @@ def _seer_day1_texts(observation, messages, calls=4):
 
 
 @pytest.mark.parametrize("observation", [SEER_FOUND_WOLF, SEER_FOUND_VILLAGER])
-def test_seer_answers_a_day1_rival_claim_with_the_sane_seer_line_and_never_claims(observation):
-    from agent.werewolf.agent import SANE_SEER_LINE
+def test_seer_never_claims_on_day1_even_against_a_rival_claim(observation):
     from agent.werewolf.parsing import _SEER_CLAIM
 
     rival = [(5, "I am the Seer. I checked Player2: WOLF. Vote Player2.")]
     agent, texts, vote = _seer_day1_texts(observation, rival)
-    assert SANE_SEER_LINE in texts  # word for word, not rewritten
+    assert not any("sane seer" in t.lower() for t in texts)  # no seer-only stock line
     assert not any(_SEER_CLAIM.search(t) for t in texts) and not agent._claimed_seer
     assert vote == ("4" if "wolf." in observation else "5")  # found wolf, else the fake seer
 
 
-def test_seer_with_a_found_wolf_pushes_it_on_day1_without_claiming():
+def test_seer_with_a_found_wolf_votes_it_on_day1_without_naming_it():
     from agent.werewolf.parsing import _SEER_CLAIM
 
     agent, texts, vote = _seer_day1_texts(SEER_FOUND_WOLF, [])
-    assert any("tells me it's Player4" in t for t in texts)
+    assert not any("Player4" in t for t in texts)
     assert not any(_SEER_CLAIM.search(t) for t in texts) and vote == "4"
+
+
+def test_seer_with_a_found_wolf_joins_a_push_on_it_but_not_on_others():
+    agent, texts, vote = _seer_day1_texts(SEER_FOUND_WOLF, [(1, "I'm voting Player4.")])
+    assert any("Player4" in t for t in texts) and vote == "4"
+    agent, texts, vote = _seer_day1_texts(SEER_FOUND_WOLF, [(1, "I'm voting Player3.")])
+    assert not any("Player3" in t for t in texts) and vote == "4"
 
 
 def test_seer_under_pressure_on_day1_still_does_not_claim():

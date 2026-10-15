@@ -23,24 +23,28 @@ unless ``WEREWOLF_BRAIN=rules``. Settings (environment or ``.env``):
   ``low`` | ``medium`` | ``high``
 
 Chat rules enforced in code, whatever Claude answers: the day-1 opener is
-sent word for word (``DAY1_OPENER``); Claude may only end its discussion when
-nobody has accused or questioned it since its last message and nothing new has
-come in, or when time is nearly up; the seer never claims on day 1; only our
-real seer uses the "any sane seer" line; the village side never votes out a
-lone day-1 seer claimant.
+sent as written (one of ``DAY1_OPENERS``, the same for every role); Claude
+may only end its discussion when nobody has accused or questioned it since
+its last message and nothing new has come in, or when time is nearly up; when
+someone says something Claude said was wrong, Claude must answer it before it
+may end, and is told to admit a real mistake; Claude never says a player has
+been silent (the chat it sees can be seconds behind); the seer never claims
+on day 1, nor names the wolf it found until someone else accuses them; the
+village side never votes out a lone day-1 seer claimant.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any, Callable
 
 from altruagent import TERMINATE_MESSAGING, DecisionContext, GameState, SendMessage
 
-from .agent import DAY1_OPENER, MAX_CHATS_PER_DAY, MAX_WORDS, WerewolfAgent
+from .agent import DAY1_OPENERS, MAX_CHATS_PER_DAY, MAX_WORDS, WerewolfAgent
 from .parsing import SEER, WOLF, _SEER_CLAIM, snapshot
 
 DEFAULT_MODEL = "claude-opus-5-5"
@@ -52,6 +56,19 @@ END_ANYTIME_SECONDS = 25.0  # with less time left than this, Claude may end its 
 NOTES_LIMIT = 1500
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 PLAYBOOK = Path(__file__).with_name("playbook.md")
+CORRECTED = "said something you said was wrong"
+# A claim that a player hasn't spoken. Our view of the chat can be seconds behind (a message may land
+# while Claude is thinking), so such claims are often false, and other agents pounce on them.
+_SILENCE_CLAIM = re.compile(
+    r"\b(?:silent|silence|quiet|lurk\w*|said nothing|says nothing|not (?:said|spoken|posted)|"
+    r"(?:has|have)n[’']?t (?:said|spoken|posted|talked|weighed in|chimed in|commented)|"
+    r"(?:has|have)n[’']?t heard (?:anything )?from|not heard (?:anything )?from)\b", re.I)
+# Owning up to an earlier claim ("calling Player5 silent was my mistake") is the opposite and is fine.
+_ADMISSION = re.compile(r"\b(?:mistake|wrong(?:ly)?|my bad|sorry|retract\w*|apolog\w*|I misread)\b", re.I)
+# Someone telling a player that what they said isn't true.
+_CORRECTION = re.compile(
+    r"\b(?:inaccura\w*|incorrect|wrong|false\w*|fabricat\w*|untrue|not true|misrepresent\w*|"
+    r"manufactur\w*|mistaken|made up|lie|lied|lying)\b", re.I)
 
 _RULES = """\
 You are playing one seat in a game of Werewolf on the AltruAgent platform, against other AI agents.
@@ -112,6 +129,8 @@ class ClaudeWerewolfAgent:
         self._accusations_read = 0
         self._asks_read = 0
         self._fresh = 0  # chat messages from others since our last decision
+        self._corrections: list[tuple[int, Any]] = []  # (seat, day): someone said we said something wrong
+        self._corrections_read = 0
 
     # -- runtime hooks ----------------------------------------------------------------------
 
@@ -150,13 +169,14 @@ class ClaudeWerewolfAgent:
         if self._ended_today or self._sent_today >= MAX_CHATS_PER_DAY:
             self._ended_today = True
             return TERMINATE_MESSAGING
-        if isinstance(advice, SendMessage) and advice.content == DAY1_OPENER:
-            self.log(f"[claude] says the day-1 opener: {DAY1_OPENER}")
+        if isinstance(advice, SendMessage) and advice.content in DAY1_OPENERS:
+            self.log(f"[claude] says the day-1 opener: {advice.content}")
             return self._sent(advice, None)
         left = state.raw.get("messaging_seconds_left")
         if isinstance(left, (int, float)) and left < MIN_SECONDS_FOR_CLAUDE:
             return self._sent(advice, "little discussion time left")
         others = sorted(s for s in snap.alive if s != snap.me)
+        corrected = sorted(s for s, why in self._owed.items() if why == CORRECTED and s in snap.alive)
         recipients = ["everyone"] + [f"Player{s}" for s in others]
         owed = [f"Player{seat} {why}" for seat, why in sorted(self._owed.items()) if seat in snap.alive]
         nearly_up = isinstance(left, (int, float)) and left < END_ANYTIME_SECONDS
@@ -170,6 +190,10 @@ class ClaudeWerewolfAgent:
             choice = (f"Send one message (decision 'send'); you can't end the discussion yet because {why}. "
                       "Answer it: if someone raised a concern about you or asked your opinion, reply to them by "
                       "name and share your current read discreetly, in words, never numbers.")
+        if corrected:
+            choice += (f" {', '.join(f'Player{s}' for s in corrected)} said something you said was wrong: check it "
+                       "against the chat. If they're right, admit it plainly in a few words first (\"My mistake, "
+                       "...\") and move on; if they're wrong, say what was actually said.")
         task = (
             f"It's the day discussion. {choice} recipient is 'everyone', or one player for a private "
             f"message only they see. At most {MAX_WORDS} words. You have sent {self._sent_today} of your "
@@ -195,8 +219,10 @@ class ClaudeWerewolfAgent:
             return self._sent(advice, "empty message")
         if snap.role == SEER and snap.day <= 1 and _SEER_CLAIM.search(text):
             return self._sent(advice, "the seer never claims on day 1")
-        if snap.role != SEER and "sane seer" in text.lower():
-            return self._sent(advice, "only our real seer uses the 'any sane seer' line")
+        if snap.role == SEER and snap.day <= 1 and self._names_hidden_wolf(snap, text):
+            return self._sent(advice, "the seer doesn't name its wolf on day 1 before someone else accuses them")
+        if _SILENCE_CLAIM.search(text) and not _ADMISSION.search(text):
+            return self._sent(advice, "it said a player has been silent, which our view of the chat can't confirm")
         to = answer.get("recipient")
         seat = int(to[len("Player"):]) if isinstance(to, str) and to.startswith("Player") else None
         message = SendMessage(text, [seat]) if seat in others else SendMessage(text)
@@ -220,6 +246,17 @@ class ClaudeWerewolfAgent:
             if speaker != snap.me and day == snap.day:
                 self._owed.setdefault(speaker, "asked you something")
         self._accusations_read, self._asks_read = len(chat.accusations), len(chat.asked_me)
+        for speaker, day in self._corrections[self._corrections_read:]:
+            if day == snap.day:
+                self._owed[speaker] = CORRECTED
+        self._corrections_read = len(self._corrections)
+
+    def _names_hidden_wolf(self, snap: Any, text: str) -> bool:
+        """A wolf our seer found, named in chat before anyone else accused them today: a seer that
+        pushes a target with no reason on day 1 gives itself away."""
+        accused = {t for spk, t, day in self.advisor.chat.accusations if day == snap.day and spk != snap.me}
+        return any(re.search(rf"\b(?:player\s*|p){t}\b", text, re.I)
+                   for t, v in snap.seer_results.items() if v == WOLF and t not in accused)
 
     def _sent(self, decision: Any, fallback_reason: str | None):
         if fallback_reason is not None:
@@ -244,6 +281,8 @@ class ClaudeWerewolfAgent:
             to = [("you" if r == me else f"Player{r}") for r in m.recipients]
             self.transcript.append({"day": day, "from": sender, "to": to or "everyone", "text": m.content})
             fresh += m.sender != me
+            if m.sender != me and _corrects(m.content or "", me, private=m.recipients == [me]):
+                self._corrections.append((m.sender, day))
         return fresh
 
     def _situation(self, state: GameState, context: DecisionContext) -> str:
@@ -339,6 +378,15 @@ class ClaudeWerewolfAgent:
                 self.log("[claude] server-side fallbacks not available; continuing without them")
                 self._use_fallbacks = False
         return self.client.messages.create(**request)
+
+
+def _corrects(text: str, me: int, *, private: bool) -> bool:
+    """Whether a message says something we said was wrong: a correction word in the same sentence as our
+    name (or anywhere in a private message to us)."""
+    if private:
+        return bool(_CORRECTION.search(text))
+    return any(_CORRECTION.search(s) and re.search(rf"\b(?:player\s*|p){me}\b", s, re.I)
+               for s in re.split(r"(?<=[.!?;])\s+", text))
 
 
 def _describe_message(decision: Any) -> str:

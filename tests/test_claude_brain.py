@@ -137,11 +137,11 @@ def test_router_uses_claude_when_keyed_and_rules_when_asked(monkeypatch):
 
 
 def test_day1_opener_is_sent_word_for_word_without_asking_claude():
-    from agent.werewolf.agent import DAY1_OPENER
+    from agent.werewolf.agent import DAY1_OPENERS
 
     client = FakeClient()
     msg = brain(client).choose_message(chat_state(day=1), ctx(6))
-    assert msg.content == DAY1_OPENER and client.requests == []
+    assert msg.content in DAY1_OPENERS and client.requests == []
 
 
 def _decisions(request):
@@ -182,11 +182,18 @@ def test_claude_may_end_when_time_is_nearly_up():
     assert _decisions(client.requests[0]) == ["send", "end"]
 
 
-def test_only_the_real_seer_uses_the_sane_seer_line():
-    line = "Any sane seer would refrain from claiming their seer status on day 1 because that just makes them a target."
-    client = FakeClient({"notes": "", "decision": "send", "recipient": "everyone", "message": line})
-    msg = brain(client).choose_message(chat_state(day=2), ctx(6))
-    assert not (isinstance(msg, SendMessage) and "sane seer" in msg.content.lower())
+def test_the_seer_does_not_name_its_wolf_on_day1_until_someone_else_does():
+    seer = "You are Player6. Your role: seer. Night 1: you investigated Player4: wolf."
+    text = "My read so far: Player4 worries me most. I'm voting Player4."
+    client = FakeClient({"notes": "", "decision": "send", "recipient": "everyone", "message": text},
+                        {"notes": "", "decision": "send", "recipient": "everyone", "message": text})
+    b = brain(client)
+    b.choose_message(chat_state(observation=seer, day=1), ctx(6))  # the opener
+    msg = b.choose_message(chat_state(observation=seer, day=1, messages=[(1, "Any leads?")]), ctx(6))
+    assert not (isinstance(msg, SendMessage) and msg.content == text)
+    msg = b.choose_message(chat_state(observation=seer, day=1, messages=[(1, "Any leads?"), (2, "I'm voting Player4.")]),
+                           ctx(6))
+    assert msg.content == text  # someone else accused Player4 first: joining is fine
 
 
 def test_chat_effort_defaults_to_medium():
@@ -201,3 +208,35 @@ def test_claude_is_overruled_when_it_votes_the_lone_day1_seer_claimant():
     b.choose_message(chat_state(day=1, messages=[(3, "I am the seer. I checked Player1: villager.")]), ctx(6))  # opener
     assert b.choose_action(vote_state(), ctx(6)).action_id != "3"
     assert len(client.requests) == 1  # Claude was asked, and overruled
+
+
+def test_claude_never_says_a_player_has_been_silent():
+    # Our view of the chat can lag: a "silent" player may have spoken while Claude was thinking.
+    for text in ("A hunch on Player5, who's been silent so far.", "Player5 hasn't said anything yet.",
+                 "We haven't heard from Player4, so I'm voting Player4."):
+        client = FakeClient({"notes": "", "decision": "send", "recipient": "everyone", "message": text})
+        msg = brain(client).choose_message(chat_state(day=2, messages=[(3, "Hi all.")]), ctx(6))
+        assert not (isinstance(msg, SendMessage) and msg.content == text)
+
+
+def test_claude_must_answer_when_told_it_said_something_wrong():
+    client = FakeClient({"notes": "", "decision": "send", "recipient": "everyone",
+                         "message": "My mistake, Player5 had spoken. I'm still voting Player5."})
+    b = brain(client)
+    msg = b.choose_message(chat_state(day=2, messages=[(1, "Calling Player5 silent is inaccurate, P6.")]), ctx(6))
+    prompt = client.requests[0]["messages"][0]["content"]
+    assert _decisions(client.requests[0]) == ["send"]
+    assert "Player1 said something you said was wrong" in prompt and "My mistake" in prompt
+    assert msg.content.startswith("My mistake")
+
+
+def test_a_correction_aimed_at_someone_else_is_not_ours_to_answer():
+    client = FakeClient({"notes": "", "decision": "send", "recipient": "everyone", "message": "Agreed."})
+    brain(client).choose_message(chat_state(day=2, messages=[(1, "Player2's claim is false.")]), ctx(6))
+    assert "said something you said was wrong" not in client.requests[0]["messages"][0]["content"]
+
+
+def test_owning_up_to_a_silence_claim_is_allowed():
+    text = "Player1, fair: calling Player5 silent was my mistake. I'm voting Player1."
+    client = FakeClient({"notes": "", "decision": "send", "recipient": "everyone", "message": text})
+    assert brain(client).choose_message(chat_state(day=2, messages=[(1, "Hi.")]), ctx(6)).content == text

@@ -401,7 +401,7 @@ class ChatFacts:
     message_counts: dict[int, int] = field(default_factory=dict)
     private_from: list[tuple[int, str, int]] = field(default_factory=list)  # (sender, text, day) sent only to me
     # Unprompted vote announcements, in order: (speaker, target, day, public message number).
-    # "Unprompted": not joining someone ("joining PlayerY's vote"), not our shared psychic pick,
+    # "Unprompted": not joining someone ("joining PlayerY's vote"), not a "psychic" pick,
     # and not a target a seer claimant called a wolf.
     pushes: list[tuple[int, int, int, int]] = field(default_factory=list)
     # Two players who pushed the same target within UNISON_GAP public messages of each other,
