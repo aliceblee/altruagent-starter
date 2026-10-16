@@ -579,7 +579,12 @@ class ClaudeWerewolfAgent:
         except Exception as exc:  # noqa: BLE001 - any API failure: the rule engine plays
             self.log(f"[claude] request failed after {self.clock() - started:.1f}s: {type(exc).__name__}: {exc}"
                      f"{_cause(exc)}")
-            if type(exc).__name__ in ("APIConnectionError", "APITimeoutError"):
+            if "credit balance is too low" in str(exc) or type(exc).__name__ in ("AuthenticationError",
+                                                                                  "PermissionDeniedError"):
+                self._unreachable = UNREACHABLE_LIMIT  # out of credit / bad key: won't fix itself this game
+                self.log("[claude] Claude can't be used (out of credit or key refused); "
+                         "the rule engine plays the rest of this game")
+            elif type(exc).__name__ in ("APIConnectionError", "APITimeoutError"):
                 self._unreachable += 1
                 if self._unreachable >= UNREACHABLE_LIMIT:
                     self.log(f"[claude] unreachable {self._unreachable} times in a row; "

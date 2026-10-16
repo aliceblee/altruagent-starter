@@ -231,3 +231,14 @@ def test_auto_thinking_is_on_for_team_preview_and_battle_turns():
     for name in ("select_lineup", "doubles_turn", "choose_action"):
         provider.complete_structured(MESSAGES, name, SCHEMA)
     assert [r.get("thinking") for r in client.requests] == [None, None, {"type": "between_tools"}]
+
+
+def test_out_of_credit_fails_over_to_openai():
+    from examples.llm.providers import FailoverProvider
+
+    broke = ProviderError("Claude request failed (BadRequestError, HTTP 400): Your credit balance is too low to access "
+                          "the Anthropic API.")
+    claude, openai = _Stub("c", broke, broke), _Stub("gpt", {"a": 1}, {"a": 2}, {"a": 3})
+    provider = FailoverProvider(claude, openai, log=lambda _m: None)
+    assert [provider.complete_structured([], "x", {}) for _ in range(3)] == [{"a": 1}, {"a": 2}, {"a": 3}]
+    assert claude.calls == 2

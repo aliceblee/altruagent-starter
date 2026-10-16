@@ -272,7 +272,7 @@ class FailoverProvider:
                 self._failures = 0
                 return answer
             except ProviderError as exc:
-                if "APIConnectionError" not in str(exc) and "APITimeoutError" not in str(exc):
+                if not _claude_unavailable(str(exc)):
                     raise
                 self._failures += 1
                 if self._failures >= self.SWITCH_AFTER:
@@ -291,6 +291,17 @@ def _as_plain_json(request: dict, schema: dict) -> None:
     note = ("Answer with only one JSON object, no other text and no code fences, matching this JSON "
             f"schema: {json.dumps(schema, separators=(',', ':'))}")
     request["messages"] = request["messages"] + [{"role": "user", "content": note}]
+
+
+# Claude can't answer at all (not "this answer was bad"): connection trouble, or the account is
+# out of credit / not authorised / rate-limited. In test games credit ran out mid-session and
+# every later call failed while OpenAI could have played.
+_UNAVAILABLE = ("APIConnectionError", "APITimeoutError", "credit balance is too low", "AuthenticationError",
+                "PermissionDeniedError", "HTTP 401", "HTTP 403", "HTTP 429")
+
+
+def _claude_unavailable(message: str) -> bool:
+    return any(marker in message for marker in _UNAVAILABLE)
 
 
 def _thinking_off(model: str) -> dict | None:

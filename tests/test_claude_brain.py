@@ -460,3 +460,12 @@ def test_unreachable_claude_is_dropped_for_the_rest_of_the_game():
     for _ in range(5):
         assert b.choose_action(vote_state(), ctx(6)).action_id != "7"  # the rule engine plays
     assert len(client.requests) == 3  # no calls after the third failure
+
+
+def test_out_of_credit_stops_claude_for_the_game_at_once():
+    err = Exception("Error code: 400 - Your credit balance is too low to access the Anthropic API.")
+    client = FakeClient(err)
+    b = brain(client)
+    for _ in range(3):
+        assert b.choose_action(vote_state(), ctx(6)).action_id != "7"
+    assert len(client.requests) == 1
