@@ -288,3 +288,46 @@ def test_red_alert_drops_builds_already_in_production():
               {"cmd": "train", "item": "e1", "count": 3}]
     kept, dropped = drop_requeued_buildings(orders, state)
     assert kept == [{"cmd": "build", "item": "barr"}, {"cmd": "train", "item": "e1", "count": 3}] and dropped == 2
+
+
+def test_pokemon_plays_on_gpt_6_1_sol_with_claude_as_backup(monkeypatch):
+    from examples.llm.providers import FailoverProvider, provider_for_game
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    pokemon = provider_for_game("pokemon_vgc_doubles_draft")
+    assert isinstance(pokemon, FailoverProvider)
+    assert isinstance(pokemon.primary, OpenAIProvider) and pokemon.primary.model == "gpt-6.1-sol"
+    assert isinstance(pokemon.backup, ClaudeProvider)
+    red_alert = provider_for_game("red_alert")
+    assert isinstance(red_alert, FailoverProvider) and isinstance(red_alert.primary, ClaudeProvider)
+
+    monkeypatch.setenv("POKEMON_PROVIDER", "claude")
+    assert isinstance(provider_for_game("pokemon_vgc_doubles_draft").primary, ClaudeProvider)
+
+
+def test_pokemon_without_an_openai_key_stays_on_claude(monkeypatch):
+    from examples.llm.providers import provider_for_game
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    assert isinstance(provider_for_game("pokemon_vgc_doubles_draft"), ClaudeProvider)
+
+
+def test_openai_rate_limits_fail_over_to_claude():
+    from examples.llm.providers import FailoverProvider
+
+    limited = ProviderError("OpenAI request failed (HTTP 429, rate_limit_exceeded)")
+    provider = FailoverProvider(_Stub("gpt-6.1-sol", limited), _Stub("claude", {"a": 1}), log=lambda _m: None)
+    assert provider.complete_structured([], "x", {}) == {"a": 1}
+
+
+def test_router_builds_the_pokemon_agent_on_gpt(monkeypatch):
+    from examples.llm.providers import FailoverProvider
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    context = DecisionContext(session_id="s", tournament_id=None, game_type="pokemon_vgc_doubles_draft",
+                              agent_id="a", seat_position=0)
+    player = Agent()._player(context)
+    assert isinstance(player._provider, FailoverProvider) and player._provider.primary.model == "gpt-6.1-sol"

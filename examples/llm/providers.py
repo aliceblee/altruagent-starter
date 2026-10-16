@@ -279,8 +279,9 @@ def _root_cause(exc: BaseException) -> str:
 
 
 class FailoverProvider:
-    """Claude first; OpenAI for any call where Claude can't be reached, and for the rest of
-    the match after ``SWITCH_AFTER`` connection failures in a row. Invalid answers are not
+    """``primary`` first; ``backup`` for any call where the primary can't answer at all
+    (connection trouble, out of credit, refused key, rate limit, server overload), and for the
+    rest of the match after ``SWITCH_AFTER`` such failures in a row. Invalid answers are not
     failed over (the agent's own retry handles those)."""
 
     SWITCH_AFTER = 2
@@ -311,10 +312,10 @@ class FailoverProvider:
                 self._failures += 1
                 if self._failures >= self.SWITCH_AFTER:
                     self._switched = True
-                    self._log(f"[llm] Claude unreachable {self._failures} times in a row ({exc}); "
+                    self._log(f"[llm] {self.primary.model} unavailable {self._failures} times in a row ({exc}); "
                               f"using {self.backup.model} for the rest of this match")
                 else:
-                    self._log(f"[llm] Claude unreachable ({exc}); this call goes to {self.backup.model}")
+                    self._log(f"[llm] {self.primary.model} unavailable ({exc}); this call goes to {self.backup.model}")
         return self.backup.complete_structured(messages, schema_name, schema, timeout=timeout)
 
 
@@ -336,7 +337,10 @@ def _as_plain_json(request: dict, schema: dict) -> None:
 # out of credit / not authorised / rate-limited. In test games credit ran out mid-session and
 # every later call failed while OpenAI could have played.
 _UNAVAILABLE = ("APIConnectionError", "APITimeoutError", "credit balance is too low", "AuthenticationError",
-                "PermissionDeniedError", "HTTP 401", "HTTP 403", "HTTP 429")
+                "PermissionDeniedError", "HTTP 401", "HTTP 403", "HTTP 429", "HTTP 5",
+                # OpenAIProvider's transport errors ("OpenAI request failed (ConnectError)")
+                "(ConnectError", "(ConnectTimeout", "(ReadTimeout", "(WriteTimeout", "(PoolTimeout",
+                "(RemoteProtocolError", "(ReadError")
 
 
 def _claude_unavailable(message: str) -> bool:
@@ -369,6 +373,34 @@ def _claude_schema(schema: Any) -> Any:
             continue
         out[key] = value if key in ("enum", "const", "required") else _claude_schema(value)
     return out
+
+
+# Pokémon plays on OpenAI by default (team decision: GPT-6.1-sol beat our Claude seat in most
+# test games), with Claude as the backup when OpenAI can't answer. POKEMON_PROVIDER=claude
+# puts it back on Claude; POKEMON_OPENAI_MODEL picks another OpenAI model.
+POKEMON_DEFAULT_PROVIDER = "openai"
+POKEMON_DEFAULT_OPENAI_MODEL = "gpt-6.1-sol"
+
+
+def provider_for_game(game_type: str | None) -> LLMProvider:
+    """The model for one game type: Pokémon per POKEMON_PROVIDER, everything else per
+    ``provider_from_env``."""
+    if (game_type or "").startswith("pokemon"):
+        choice = (os.environ.get("POKEMON_PROVIDER") or POKEMON_DEFAULT_PROVIDER).lower()
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if choice == "openai" and api_key:
+            openai = OpenAIProvider(api_key, os.environ.get("POKEMON_OPENAI_MODEL") or POKEMON_DEFAULT_OPENAI_MODEL,
+                                    base_url=os.environ.get("OPENAI_BASE_URL") or DEFAULT_OPENAI_BASE_URL)
+            if os.environ.get("ANTHROPIC_API_KEY"):
+                claude = ClaudeProvider(
+                    model=os.environ.get("CLAUDE_MODEL") or DEFAULT_CLAUDE_MODEL,
+                    effort=os.environ.get("CLAUDE_EFFORT") or DEFAULT_CLAUDE_EFFORT,
+                    thinking=(os.environ.get("CLAUDE_THINKING") or DEFAULT_CLAUDE_THINKING).lower(),
+                    deep_model=os.environ.get("CLAUDE_DEEP_MODEL", DEFAULT_DEEP_MODEL) or None,
+                )
+                return FailoverProvider(openai, claude)
+            return openai
+    return provider_from_env()
 
 
 def provider_from_env() -> LLMProvider:

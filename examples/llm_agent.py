@@ -83,7 +83,7 @@ from altruagent import (
 from examples.llm import pokemon, redalert
 from examples.llm.playbooks import playbook
 from examples.llm.base import AdapterFactory, Choice, InvalidChoice, UnsupportedStructuredAction, object_schema
-from examples.llm.providers import LLMProvider, ProviderError, provider_from_env
+from examples.llm.providers import LLMProvider, ProviderError, provider_for_game, provider_from_env
 
 # Structured-action adapters, by template type. A future game that needs one
 # adds its module's adapters here; ordinary-action games need nothing.
@@ -398,6 +398,8 @@ def _state_json(state: GameState) -> str:
     return text
 
 
-def create_agent() -> LLMAgent:
+def create_agent(game_type: str | None = None) -> LLMAgent:
+    """``game_type`` picks a per-game model when one is configured (Pokémon: see
+    ``examples.llm.providers.provider_for_game``)."""
     load_dotenv()  # no-op if already loaded; never overrides real env vars
-    return LLMAgent(provider_from_env())
+    return LLMAgent(provider_for_game(game_type))

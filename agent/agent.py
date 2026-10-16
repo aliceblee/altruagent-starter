@@ -16,7 +16,9 @@ runtime asks for a decision:
   LLM only rewrites the planned chat messages (disable with
   `WEREWOLF_LLM_CHAT=0`). Set `WEREWOLF_DEBUG=1` to log every decision and
   the first private observation.
-- **Any other game** (Pokémon, Red Alert) -> `examples.llm_agent.LLMAgent`
+- **Any other game** (Pokémon, Red Alert) -> `examples.llm_agent.LLMAgent`.
+  Pokémon plays on OpenAI `gpt-6.1-sol` when `OPENAI_API_KEY` is set (Claude as
+  backup; `POKEMON_PROVIDER=claude` switches it). Otherwise the game plays
   on Claude when `ANTHROPIC_API_KEY` is set (`CLAUDE_MODEL`, default
   `claude-sonnet-5-5`; `CLAUDE_EFFORT`, default `low`), else on OpenAI when
   `OPENAI_API_KEY` is set, otherwise the first legal action (which can't finish Pokémon or
@@ -85,7 +87,7 @@ class Agent:
             elif os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("OPENAI_API_KEY"):
                 from examples.llm_agent import create_agent as create_llm_agent
 
-                self._delegate = create_llm_agent()
+                self._delegate = create_llm_agent(context.game_type)
                 self._delegate._log = self._llm_note  # its [llm] lines (incl. FALLBACK) go to the decision log too
             else:
                 self._delegate = _FirstLegal()
