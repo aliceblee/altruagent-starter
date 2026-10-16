@@ -473,11 +473,50 @@ def build_system_prompt(config: dict[str, Any] | None) -> str:
     return "\n\n".join(sections)
 
 
+# What the item codes are. An official game: the model took ftrk (a flak truck)
+# for a "flame truck" and built 77 of them as its main army.
+ITEM_ROLES = {
+    "e1": "rifle infantry, vs infantry",
+    "e2": "grenadier, vs infantry and buildings",
+    "e3": "rocket soldier, vs vehicles and aircraft",
+    "e4": "flamethrower, vs infantry",
+    "e6": "engineer, captures buildings, no weapon",
+    "dog": "attack dog, vs infantry",
+    "medi": "medic, heals infantry, no weapon",
+    "shok": "shock trooper, vs vehicles",
+    "harv": "ore harvester, no weapon",
+    "mcv": "builds a construction yard",
+    "1tnk": "light tank, fast",
+    "2tnk": "medium tank, main battle tank",
+    "3tnk": "heavy tank, main battle tank",
+    "4tnk": "mammoth tank, very strong and slow",
+    "ftrk": "flak truck: anti-aircraft, weak vs ground",
+    "apc": "armored transport, machine gun",
+    "jeep": "ranger: fast scout, light gun",
+    "arty": "artillery: long range, fragile",
+    "v2rl": "V2 rocket launcher: long range, fragile",
+    "ttnk": "tesla tank",
+    "mnly": "minelayer, no gun",
+    "fix": "service depot: repairs vehicles, unlocks 2tnk/3tnk",
+    "silo": "ore silo: stores ore",
+    "dome": "radar dome: unlocks tech",
+    "pbox": "pillbox defense, vs infantry",
+    "hbox": "camo pillbox defense, vs infantry",
+    "gun": "turret defense, vs vehicles",
+    "ftur": "flame tower defense, vs infantry",
+    "tsla": "tesla coil defense, strong, uses lots of power",
+    "sam": "anti-aircraft defense",
+    "agun": "anti-aircraft gun defense",
+}
+
+
 def _item_facts(name: str, rules: dict[str, Any]) -> dict[str, Any]:
     """An available_production entry with cost/power/build time from the rules."""
     key = name.lower()
     info = _dict(_dict(rules.get("buildings")).get(key)) or _dict(_dict(rules.get("units")).get(key))
     entry: dict[str, Any] = {"item": key}
+    if key in ITEM_ROLES:
+        entry["role"] = ITEM_ROLES[key]
     if info.get("queue"):
         entry["queue"] = info["queue"]
     if info.get("cost") is not None:
@@ -746,7 +785,14 @@ SAVE_CASH_BELOW = 1000
 # Combat vehicles; once the economy runs, one is kept in production (the first
 # of TANK_PREFERENCE that is available).
 VEHICLE_TYPES = frozenset({"1tnk", "2tnk", "3tnk", "4tnk", "ftrk", "apc", "jeep", "arty", "v2rl", "ttnk", "ctnk", "mnly", "mrj", "mgg", "qtnk", "stnk", "dtrk"})
-TANK_PREFERENCE = ("2tnk", "3tnk", "1tnk", "ftrk", "jeep")
+TANK_PREFERENCE = ("2tnk", "3tnk", "1tnk")
+MAIN_TANKS = ("2tnk", "3tnk")
+SERVICE_DEPOT = "fix"
+FLAK_TRUCK = "ftrk"
+# Static defenses: at most MAX_DEFENSES owned + in production. An official loss:
+# 21 turrets and tesla coils (and the power plants to run them), 27 units vs 100.
+DEFENSE_TYPES = frozenset({"pbox", "hbox", "gun", "ftur", "tsla", "sam", "agun"})
+MAX_DEFENSES = 4
 # Buildings that wait until the war factory stands (a second refinery, barracks
 # or power plant are handled separately).
 HOLD_BEFORE_WAR_FACTORY = frozenset({"silo", "dome", "fix", "kenn", "hpad", "afld", "spen", "syrd", "atek", "stek", "iron", "pdox", "mslo", "gap"})
@@ -769,7 +815,11 @@ def save_for_economy(orders: list[dict[str, Any]], state: dict[str, Any]) -> tup
     barracks and the HOLD_BEFORE_WAR_FACTORY buildings wait. Once harvesters can
     be trained: while they are short, one is queued when none is; then a tank is
     kept in production; infantry waits while cash is below SAVE_CASH_BELOW.
-    ``build`` of a unit becomes ``train`` (units are trained, not built)."""
+    ``build`` of a unit becomes ``train`` (units are trained, not built).
+    Always: static defenses are capped at MAX_DEFENSES, a flak truck order
+    becomes the best tank available, and when no main battle tank can be built
+    a service depot (which unlocks it) is queued. An official loss as Soviet:
+    77 flak trucks, no depot, 21 defenses."""
     obs = _dict(state.get("observation"))
     buildings = _types(_list(obs, "buildings"))
     units = _types(_list(obs, "units"))
@@ -787,6 +837,21 @@ def save_for_economy(orders: list[dict[str, Any]], state: dict[str, Any]) -> tup
         item = str(order.get("item") or "").lower()
         if order.get("cmd") == "build" and (item in INFANTRY_TYPES or item in VEHICLE_TYPES or item == HARVESTER):
             order = {"cmd": "train", "item": item, "count": 1}
+        fixed.append(order)
+    orders = fixed
+    defenses = sum(t in DEFENSE_TYPES for t in buildings + in_production)
+    tank = next((t for t in TANK_PREFERENCE if t in available), None)
+    fixed = []
+    for order in orders:
+        item = str(order.get("item") or "").lower()
+        if order.get("cmd") == "build" and item in DEFENSE_TYPES:
+            if defenses >= MAX_DEFENSES:
+                notes.append(f"held {item}: {defenses} defenses already")
+                continue
+            defenses += 1
+        if order.get("cmd") == "train" and item == FLAK_TRUCK and tank:
+            notes.append(f"trained {tank} instead of ftrk (a flak truck, weak against ground)")
+            order = {**order, "item": tank}
         fixed.append(order)
     orders = fixed
     kept: list[dict[str, Any]] = []
@@ -837,7 +902,14 @@ def save_for_economy(orders: list[dict[str, Any]], state: dict[str, Any]) -> tup
             kept.insert(0, {"cmd": "train", "item": HARVESTER, "count": 1})
             notes.append(f"queued a harvester ({harvesters} of {wanted})")
         return kept, notes
-    tank = next((t for t in TANK_PREFERENCE if t in available), None)
+    building = buildings + in_production
+    if (
+        not any(t in available for t in MAIN_TANKS) and SERVICE_DEPOT in available
+        and SERVICE_DEPOT not in building
+        and not any(o.get("cmd") == "build" and str(o.get("item") or "").lower() == SERVICE_DEPOT for o in kept)
+    ):
+        kept.insert(0, {"cmd": "build", "item": SERVICE_DEPOT})
+        notes.append("queued a service depot: it unlocks the main battle tank")
     if tank and not any(t in VEHICLE_TYPES for t in queued) and not (asked & VEHICLE_TYPES):
         kept.insert(0, {"cmd": "train", "item": tank, "count": 1})
         notes.append(f"queued a {tank}: no tank in production")

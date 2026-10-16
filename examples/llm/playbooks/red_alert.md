@@ -57,6 +57,14 @@ no code needed. Keep it short.
 - After the economy is running, build steadily from barracks and war factory:
   tanks (1tnk/2tnk/3tnk, from available_production) are worth far more than
   rifle infantry (e1); mix in rocket infantry (e3) against vehicles.
+- Main battle tanks: Allies 2tnk (medium), Soviet 3tnk (heavy). They need a
+  **service depot (fix)**: if they aren't in available_production, build fix
+  right after the war factory. ftrk is a flak truck (anti-aircraft), not a
+  flame truck: weak against ground, train it only against enemy aircraft. In
+  an official game we built 77 of them, no fix and no heavy tanks, and lost
+  $30,000 of units for $5,450 of kills.
+- Defenses are a supplement: at most 3-4 in total. Money in tanks beats money
+  in towers (that same game: 21 turrets and tesla coils, 27 units vs 100).
 - Rally new units to a spot **in front of your base**, not into the enemy.
 - Don't trickle units into the enemy one by one. Attack with one large group
   (roughly 10+ units including tanks), attack-moving together, and target

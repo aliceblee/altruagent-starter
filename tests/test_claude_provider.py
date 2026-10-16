@@ -403,3 +403,30 @@ def test_red_alert_keeps_a_tank_in_production_and_holds_extras_before_the_war_fa
               {"cmd": "build", "item": "pbox"}]
     kept, notes = save_for_economy(orders, early)
     assert kept == [{"cmd": "build", "item": "powr"}, {"cmd": "build", "item": "pbox"}] and len(notes) == 2
+
+
+def test_red_alert_soviet_gets_a_service_depot_and_tanks_not_flak_trucks():
+    from examples.llm.redalert import _item_facts, save_for_economy
+
+    soviet = _ra_state(["fact", "powr", "proc", "barr", "weap"], units=["harv", "harv"], cash=2000,
+                       available=["e1", "harv", "ftrk", "fix"])
+    kept, notes = save_for_economy([{"cmd": "train", "item": "ftrk", "count": 3}], soviet)
+    assert kept == [{"cmd": "build", "item": "fix"}, {"cmd": "train", "item": "ftrk", "count": 3}]
+    with_depot = _ra_state(["fact", "powr", "proc", "barr", "weap", "fix"], units=["harv", "harv"], cash=2000,
+                           available=["e1", "harv", "ftrk", "3tnk"])
+    kept, notes = save_for_economy([{"cmd": "train", "item": "ftrk", "count": 3}], with_depot)
+    assert kept == [{"cmd": "train", "item": "3tnk", "count": 3}]
+    # No flak truck is ever queued by the guard itself.
+    kept, _ = save_for_economy([], soviet)
+    assert kept == [{"cmd": "build", "item": "fix"}]
+    assert _item_facts("ftrk", {})["role"].startswith("flak truck")
+
+
+def test_red_alert_caps_static_defenses():
+    from examples.llm.redalert import save_for_economy
+
+    state = _ra_state(["fact", "powr", "proc", "barr", "weap", "ftur", "tsla", "tsla"],
+                      production=[{"queue": "Defense", "item": "ftur"}], units=["harv", "harv"],
+                      available=["harv", "3tnk"], cash=3000)
+    kept, notes = save_for_economy([{"cmd": "build", "item": "tsla"}, {"cmd": "train", "item": "3tnk"}], state)
+    assert kept == [{"cmd": "train", "item": "3tnk"}] and notes == ["held tsla: 4 defenses already"]
