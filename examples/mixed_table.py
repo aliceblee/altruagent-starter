@@ -331,6 +331,23 @@ class Mixed:
         if self._record is not None:
             self._record.write(context, kind, brain=self.name, **fields)
 
+    def _relabel(self, state: GameState) -> None:
+        """Every seat here is on our account, so the server names them all "alime588 (PlayerN, ...)"
+        and our agent would read the dummies as copies of itself. Give each non-"ours" seat a team
+        named after its brain ("Test-gemini (Player4, Self-hosted)"), everywhere the state names it
+        (players, alive, dead, vote history), so the seat-by-team list looks like a real table."""
+        raw = state.raw if isinstance(state.raw, dict) else None
+        if raw is None:
+            return
+        renames = {}
+        for p in raw.get("players") or []:
+            pos, name = (p.get("position"), p.get("name")) if isinstance(p, dict) else (None, None)
+            brain = self._seats.get(pos) if isinstance(pos, int) else None
+            if isinstance(name, str) and brain and not brain.startswith("ours"):
+                renames[name] = f"Test-{brain} (Player{pos}, Self-hosted)"
+        if renames:
+            state.raw = _renamed(raw, renames)
+
     def _hear(self, state: GameState, context: DecisionContext) -> None:
         if self._memory is not None:
             self._memory.observe(state, context)
@@ -343,6 +360,7 @@ class Mixed:
 
     def choose_action(self, state: GameState, context: DecisionContext):
         brain = self._inner(context)
+        self._relabel(state)
         self._hear(state, context)
         decision, problem = None, None
         try:
@@ -366,6 +384,7 @@ class Mixed:
 
     def choose_message(self, state: GameState, context: DecisionContext):
         brain = self._inner(context)
+        self._relabel(state)
         self._hear(state, context)
         method = getattr(brain, "choose_message", None)
         decision, problem = TERMINATE_MESSAGING, None
@@ -411,6 +430,17 @@ class Mixed:
                 self._memory.finish(final_state, context, outcome, agent=self.name or UNLISTED_SEAT)
         except Exception as exc:  # noqa: BLE001
             _log(context.seat_position, f"{self.name} on_game_end failed: {type(exc).__name__}: {exc}")
+
+
+def _renamed(value: Any, renames: dict[str, str]) -> Any:
+    """``value`` with every string (and dict key) equal to an old name replaced by its new one."""
+    if isinstance(value, str):
+        return renames.get(value, value)
+    if isinstance(value, dict):
+        return {renames.get(k, k) if isinstance(k, str) else k: _renamed(v, renames) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_renamed(v, renames) for v in value]
+    return value
 
 
 def create_agent() -> Mixed:
