@@ -24,8 +24,14 @@ no code needed. Keep it short.
   place finished buildings at once (place without `at`).
 - Keep harvesters harvesting; if one is idle or under attack, send it back to
   the ore and defend it.
-- Money at zero means too few harvesters: build a harvester (or a refinery)
-  before more units. (Test games won, but stalled at zero cash mid-game.)
+- **Your money is cash plus stored ore.** In OpenRA, ore sitting in refineries
+  and silos is spent automatically when you build, so "cash 0" with ore
+  stored is not broke: keep queuing. If ore storage is full, harvesters can't
+  unload and income stops: build a silo (or spend) at once. In testing we
+  sat at "cash is zero, waiting for income" for 7 minutes with ore stored.
+- Keep about two harvesters per refinery, and rebuild a lost harvester before
+  anything else. One harvester can't feed a war factory (in testing we had
+  "the lone harvester" for most of a match and trained 2 tanks in 10 minutes).
 
 ## Army
 
