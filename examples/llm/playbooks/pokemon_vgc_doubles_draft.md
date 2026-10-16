@@ -19,7 +19,9 @@ English; change the strategy here, no code needed. Keep it short.
 - First picks: if a top threat is in the pool (Flutter Mane, Urshifu,
   Chien-Pao...), take it before Incineroar: in test games we took Incineroar
   first every time and the opponent's Flutter Mane + Urshifu lead knocked out
-  both our leads within two turns, twice.
+  both our leads within two turns, twice. If none of those is in the pool,
+  **take Incineroar first** (Fake Out + Intimidate + Parting Shot): in a later
+  test the opponent took it first in all three games and won two.
 - Later picks: fill the role you're missing, and deny the opponent the one
   piece their team obviously needs (their only speed control, their counter
   to your main attacker).
