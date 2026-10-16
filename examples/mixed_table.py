@@ -327,6 +327,7 @@ class Mixed:
         self._record: Any = None  # DecisionLog for non-"ours" seats ("ours" logs on its own)
         self._heard: set[int] = set()
         self._memory: Any = None  # GameMemory for non-"ours" seats ("ours" keeps its own)
+        self._model_failures = 0  # moves this LLM seat played as LLMAgent's fallback
 
     def _inner(self, context: DecisionContext) -> Any:
         if self._brain is None:
@@ -406,7 +407,7 @@ class Mixed:
             # Structured moves (Pokémon team/turn payloads, Red Alert order batches, WAIT) go
             # through as they are: LLMAgent validates them and has its own fallbacks, and the
             # Werewolf safety net below would reject anything that isn't a plain legal action.
-            decision = brain.choose_action(state, context)
+            decision = self._flag_model_failure(brain.choose_action(state, context), context, werewolf=False)
             if decision is not WAIT:
                 self._write(context, "action", phase=state.phase, decision=repr(decision)[:500],
                             reasoning=getattr(decision, "reasoning_summary", None))
@@ -415,7 +416,9 @@ class Mixed:
         self._hear(state, context)
         decision, problem = None, None
         try:
-            decision = brain.choose_action(state, context)
+            decision = self._flag_model_failure(brain.choose_action(state, context), context, werewolf=True)
+            if decision is None:
+                decision = _fallback(state)
             if _legal(decision, state) is None:
                 problem = f"returned {decision!r}, not a legal action"
         except Exception as exc:  # noqa: BLE001 - the safety net
@@ -432,6 +435,19 @@ class Mixed:
             source="fallback" if problem else "agent", error=problem, observation=state.observation,
         )
         return decision
+
+    def _flag_model_failure(self, decision: Any, context: DecisionContext, *, werewolf: bool) -> Any:
+        """An LLM seat whose model didn't answer plays LLMAgent's fallback: the first legal action,
+        which in Werewolf is a vote on seat 0 (usually ours). Warn loudly (the game's result doesn't
+        mean much) and, in Werewolf, return None so the seat abstains instead of piling onto seat 0."""
+        if not str(getattr(decision, "reasoning_summary", "") or "").startswith("Fallback:"):
+            return decision
+        self._model_failures += 1
+        if self._model_failures in (1, 5, 20):
+            _log(context.seat_position, f"WARNING: {self.name}'s model gave no answer ({self._model_failures} moves so "
+                                        "far; see its [llm] lines above): this test game's result doesn't count")
+            self._write(context, "note", text=f"[mixed] OPPONENT MODEL FAILING: {self._model_failures} fallback moves")
+        return None if werewolf else decision
 
     def choose_message(self, state: GameState, context: DecisionContext):
         brain = self._inner(context)

@@ -242,3 +242,11 @@ def test_out_of_credit_fails_over_to_openai():
     provider = FailoverProvider(claude, openai, log=lambda _m: None)
     assert [provider.complete_structured([], "x", {}) for _ in range(3)] == [{"a": 1}, {"a": 2}, {"a": 3}]
     assert claude.calls == 2
+
+
+def test_battle_turns_get_medium_effort_draft_picks_stay_low():
+    client = FakeClient({"action_id": "a", "n": 0}, {"action_id": "a", "n": 0})
+    provider = ClaudeProvider(client, "claude-sonnet-5-5", effort="low")
+    provider.complete_structured(MESSAGES, "doubles_turn", SCHEMA)
+    provider.complete_structured(MESSAGES, "choose_action", SCHEMA)
+    assert [r["output_config"]["effort"] for r in client.requests] == ["medium", "low"]

@@ -27,6 +27,11 @@ DEFAULT_CLAUDE_EFFORT = "low"
 # spare (Pokémon team preview: 90 s; battle turns: 55 s, which took ~2.5 s with it off).
 DEFAULT_CLAUDE_THINKING = "auto"
 THINKING_DECISIONS = frozenset({"select_lineup", "doubles_turn"})
+# Those decisions also get at least this effort: at "low" Claude's battle notes had type mistakes
+# it corrected mid-sentence ("Wait: Chien-Pao is Dark/Ice and would take Earthquake"), with turns
+# taking ~2.5 s of a 40 s budget. CLAUDE_THINKING_EFFORT overrides it.
+THINKING_EFFORT = "medium"
+_EFFORT_ORDER = ("low", "medium", "high", "xhigh", "max")
 CLAUDE_MAX_TOKENS = 16000
 CLAUDE_FALLBACK_BETA = "server-side-fallback-2026-07-01"
 # Keywords Claude's structured outputs don't accept; the adapters' own validation
@@ -156,6 +161,7 @@ class ClaudeProvider:
         self.model = model
         self.effort = effort
         self._thinking_mode = thinking
+        self.thinking_effort = os.environ.get("CLAUDE_THINKING_EFFORT") or THINKING_EFFORT
         self._thinking = _thinking_off(model) if thinking in ("off", "auto") else None
         # Schemas Claude's structured outputs refused as too large (Red Alert's order batches):
         # asked for as plain JSON instead, with the schema in the prompt.
@@ -185,6 +191,8 @@ class ClaudeProvider:
         thinks = self._thinking_mode == "on" or (self._thinking_mode == "auto" and schema_name in THINKING_DECISIONS)
         if self._thinking is not None and not thinks:
             request["thinking"] = self._thinking
+        if self._thinking_mode == "auto" and schema_name in THINKING_DECISIONS:
+            request["output_config"]["effort"] = _at_least(self.effort, self.thinking_effort)
         if system:
             request["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
         if timeout is not None:
@@ -289,6 +297,11 @@ class FailoverProvider:
                 else:
                     self._log(f"[llm] Claude unreachable ({exc}); this call goes to {self.backup.model}")
         return self.backup.complete_structured(messages, schema_name, schema, timeout=timeout)
+
+
+def _at_least(effort: str, floor: str) -> str:
+    order = {name: i for i, name in enumerate(_EFFORT_ORDER)}
+    return effort if order.get(effort, 0) >= order.get(floor, 0) else floor
 
 
 def _as_plain_json(request: dict, schema: dict) -> None:

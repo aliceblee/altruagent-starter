@@ -51,3 +51,18 @@ def test_comparison_seats_set_the_provider_for_their_own_process_only(monkeypatc
     monkeypatch.setattr(os, "environ", dict(os.environ))  # keep the test's own environment clean
     m.BRAINS["ours_openai"](1)
     assert built[-1]["LLM_PROVIDER"] == "openai" and built[-1]["OPENAI_MODEL"] == m.OPENAI_61_MODEL
+
+
+def test_a_failing_llm_seat_abstains_in_werewolf_instead_of_voting_seat_0():
+    import examples.mixed_table as m
+    from altruagent import DecisionContext, WithReasoning
+    from tests.test_werewolf_agent import state
+
+    class Broken:
+        def choose_action(self, st, context):
+            return WithReasoning(st.legal_actions[0], "Fallback: the model gave no valid answer, so a default legal action was played.")
+
+    seat = m.Mixed(seats={3: "broken"}, brains={"broken": lambda s: Broken()})
+    ctx = DecisionContext(session_id="w", tournament_id=None, game_type="werewolf", agent_id="a", seat_position=3)
+    move = seat.choose_action(state(3, "Your role: villager.", legal=[0, 1, 2, 4, 5, 6, 7]), ctx)
+    assert m._legal(move, state(3, "x", legal=[0, 1, 2, 4, 5, 6, 7])).action_id == "7"
