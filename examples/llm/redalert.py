@@ -730,6 +730,95 @@ def drop_requeued_buildings(orders: list[dict[str, Any]], state: dict[str, Any])
     return kept, dropped
 
 
+WAR_FACTORY = "weap"
+HARVESTER = "harv"
+INFANTRY_TYPES = frozenset({"e1", "e2", "e3", "e4", "e6", "e7", "dog", "medi", "mech", "spy", "thf", "shok", "hijacker"})
+# Before the war factory: at most this many infantry (owned + queued), and no
+# second power plant while power covers the war factory (it drains ~30).
+INFANTRY_BEFORE_WAR_FACTORY = 5
+WAR_FACTORY_POWER = 30
+POWER_PLANT_OUTPUT = 100
+# With a war factory: harvesters wanted per refinery (capped), and the cash
+# below which infantry waits while the harvesters are short.
+HARVESTERS_PER_REFINERY = 2
+MAX_HARVESTERS_WANTED = 4
+SAVE_CASH_BELOW = 1000
+
+
+def _types(items: list[dict[str, Any]]) -> list[str]:
+    return [str(a.get("type") or "").lower() for a in items]
+
+
+def save_for_economy(orders: list[dict[str, Any]], state: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
+    """``orders`` adjusted so the economy comes first, and what was changed.
+
+    Test games (16 vs GPT-6.1): the model trained 15-20 riflemen and queued extra
+    power plants before the war factory, so cash hit zero, the war factory's
+    progress stalled and it was placed at 150-240 s; then it ran a whole game on
+    one harvester with no cash and built no tanks. So, until a war factory stands:
+    infantry is capped at INFANTRY_BEFORE_WAR_FACTORY and a power plant is not
+    queued while power covers the war factory. Once harvesters can be trained:
+    while they are short, one is queued when none is, and infantry waits while
+    cash is below SAVE_CASH_BELOW."""
+    obs = _dict(state.get("observation"))
+    buildings = _types(_list(obs, "buildings"))
+    units = _types(_list(obs, "units"))
+    production = _list(obs, "production")
+    queued = [str(p.get("item") or "").lower() for p in production if not p.get("ready")]
+    economy = _dict(obs.get("economy"))
+    cash = economy.get("cash")
+    available = {str(x).lower() for x in obs.get("available_production") or []}
+    if not buildings:
+        return orders, []
+    notes: list[str] = []
+    kept: list[dict[str, Any]] = []
+    if WAR_FACTORY not in buildings:
+        room = INFANTRY_BEFORE_WAR_FACTORY - sum(t in INFANTRY_TYPES for t in units + queued)
+        provided, drained = economy.get("power_provided"), economy.get("power_drained")
+        surplus = None
+        if _is_int(provided) and _is_int(drained):
+            surplus = provided - drained + POWER_PLANT_OUTPUT * queued.count(POWER_PLANT)
+        for order in orders:
+            item = str(order.get("item") or "").lower()
+            if order.get("cmd") == "train" and item in INFANTRY_TYPES:
+                count = order.get("count", 1)
+                if room <= 0:
+                    notes.append(f"held {item} x{count} until the war factory")
+                    continue
+                if count > room:
+                    notes.append(f"trimmed {item} to x{room} until the war factory")
+                    order = {**order, "count": room}
+                room -= order.get("count", 1)
+            elif (
+                order.get("cmd") == "build" and item == POWER_PLANT and surplus is not None
+                and surplus >= WAR_FACTORY_POWER and (POWER_PLANT in buildings or POWER_PLANT in queued)
+            ):
+                notes.append("held a power plant: power covers the war factory")
+                continue
+            kept.append(order)
+        return kept, notes
+    if HARVESTER not in available:
+        return orders, notes
+    refineries = buildings.count(REFINERY)
+    wanted = min(MAX_HARVESTERS_WANTED, HARVESTERS_PER_REFINERY * max(1, refineries))
+    harvesters = units.count(HARVESTER) + queued.count(HARVESTER)
+    if harvesters >= wanted:
+        return orders, notes
+    asked = any(o.get("cmd") in ("train", "build") and str(o.get("item") or "").lower() == HARVESTER for o in orders)
+    for order in orders:
+        item = str(order.get("item") or "").lower()
+        if order.get("cmd") == "build" and item == HARVESTER:
+            order = {"cmd": "train", "item": HARVESTER, "count": 1}  # harvesters are trained, not built
+        if order.get("cmd") == "train" and item in INFANTRY_TYPES and _is_int(cash) and cash < SAVE_CASH_BELOW:
+            notes.append(f"held {item}: cash {cash} goes to harvesters first")
+            continue
+        kept.append(order)
+    if HARVESTER not in queued and not asked:
+        kept.insert(0, {"cmd": "train", "item": HARVESTER, "count": 1})
+        notes.append(f"queued a harvester ({harvesters} of {wanted})")
+    return kept, notes
+
+
 # --- The player ---------------------------------------------------------------------
 
 
@@ -835,6 +924,10 @@ class RedAlertPlayer:
         orders, requeued = drop_requeued_buildings(orders, raw)
         if requeued:
             self._log(f"[llm] red_alert: dropped {requeued} duplicate build / lone-cancel order(s)")
+        orders, saved = save_for_economy(orders, raw)
+        if saved:
+            self._log(f"[llm] red_alert: economy first: {'; '.join(saved)}")
+            orders = orders[: _limits(raw)["max_orders_per_batch"]]
         reasoning = trim_reasoning(answer.get("reasoning_summary"))
         self._last_reasoning = reasoning
         if not orders:

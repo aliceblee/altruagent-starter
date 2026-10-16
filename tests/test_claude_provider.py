@@ -342,3 +342,45 @@ def test_red_alert_never_cancels_the_only_copy_of_a_building():
     orders = [{"cmd": "cancel", "item": "weap"}, {"cmd": "cancel", "item": "powr"}]
     kept, dropped = drop_requeued_buildings(orders, state)
     assert kept == [{"cmd": "cancel", "item": "powr"}] and dropped == 1  # a real duplicate may still go
+
+
+def _ra_state(buildings, units=(), production=(), cash=3000, power=(100, 50), available=()):
+    return {"observation": {
+        "buildings": [{"id": i + 1, "type": t} for i, t in enumerate(buildings)],
+        "units": [{"id": i + 100, "type": t} for i, t in enumerate(units)],
+        "production": [dict(p) for p in production],
+        "economy": {"cash": cash, "power_provided": power[0], "power_drained": power[1]},
+        "available_production": list(available),
+    }}
+
+
+def test_red_alert_caps_infantry_and_power_before_the_war_factory():
+    from examples.llm.redalert import save_for_economy
+
+    state = _ra_state(["fact", "powr", "proc", "tent"], units=["harv", "e1", "e1"],
+                      production=[{"queue": "Infantry", "item": "e1"}, {"queue": "Building", "item": "weap"}])
+    orders = [{"cmd": "train", "item": "e1", "count": 4}, {"cmd": "build", "item": "powr"},
+              {"cmd": "train", "item": "e3", "count": 2}, {"cmd": "attack_move", "units": [101], "to": [5, 5]}]
+    kept, notes = save_for_economy(orders, state)
+    assert kept == [{"cmd": "train", "item": "e1", "count": 2}, {"cmd": "attack_move", "units": [101], "to": [5, 5]}]
+    assert len(notes) == 3
+    # Short on power: the power plant goes out.
+    kept, _ = save_for_economy([{"cmd": "build", "item": "powr"}], _ra_state(["fact", "powr"], power=(100, 90)))
+    assert kept == [{"cmd": "build", "item": "powr"}]
+
+
+def test_red_alert_queues_harvesters_once_the_war_factory_stands():
+    from examples.llm.redalert import save_for_economy
+
+    state = _ra_state(["fact", "powr", "proc", "tent", "weap"], units=["harv"], cash=400,
+                      available=["e1", "harv", "1tnk"])
+    kept, notes = save_for_economy([{"cmd": "train", "item": "e1", "count": 5}, {"cmd": "train", "item": "1tnk"}], state)
+    assert kept == [{"cmd": "train", "item": "harv", "count": 1}, {"cmd": "train", "item": "1tnk"}]
+    assert len(notes) == 2
+    # The model's own "build harv" becomes a train, and nothing extra is queued.
+    kept, _ = save_for_economy([{"cmd": "build", "item": "harv"}], state)
+    assert kept == [{"cmd": "train", "item": "harv", "count": 1}]
+    # Enough harvesters: orders pass untouched.
+    rich = _ra_state(["fact", "powr", "proc", "tent", "weap"], units=["harv", "harv"], cash=400, available=["harv"])
+    orders = [{"cmd": "train", "item": "e1", "count": 5}]
+    assert save_for_economy(orders, rich) == (orders, [])
