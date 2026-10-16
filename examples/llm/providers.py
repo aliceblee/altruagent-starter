@@ -140,7 +140,9 @@ class ClaudeProvider:
         if client is None:
             import anthropic
 
-            client = anthropic.Anthropic(max_retries=1, timeout=timeout)
+            # No SDK retries: the LLM agent retries itself, and a dead connection should fail
+            # fast enough to leave time for the fallback (test games lost ~4.5 s per failed call).
+            client = anthropic.Anthropic(max_retries=0, timeout=timeout)
         self._client = client
         self.model = model
         self.effort = effort
@@ -179,6 +181,8 @@ class ClaudeProvider:
             if isinstance(status, int) and 400 <= status < 500 and status not in (401, 403):
                 # The API's own message ("thinking.type ... is not supported") says what to fix.
                 detail = ": " + re.sub(r"sk-ant-\S+", "[key]", str(getattr(exc, "message", "") or ""))[:300]
+            if status is None:
+                detail = _root_cause(exc)  # e.g. ": ConnectError: [SSL: CERTIFICATE_VERIFY_FAILED] ..."
             raise ProviderError(f"Claude request failed ({type(exc).__name__}"
                                 f"{f', HTTP {status}' if status else ''}){detail}") from None
         if response.stop_reason == "refusal":
@@ -203,6 +207,58 @@ class ClaudeProvider:
                     raise
                 self._use_fallbacks = False  # not available for this model/account: plain requests from now on
         return self._client.messages.create(**request)
+
+
+def _root_cause(exc: BaseException) -> str:
+    """The innermost cause of a connection error, as ": Type: message" (no secrets: these
+    come from the network stack, not from the request)."""
+    seen, inner = set(), exc
+    while (inner.__cause__ or inner.__context__) is not None and id(inner) not in seen:
+        seen.add(id(inner))
+        inner = inner.__cause__ or inner.__context__
+    if inner is exc:
+        return ""
+    return ": " + re.sub(r"sk-ant-\S+", "[key]", f"{type(inner).__name__}: {inner}")[:300]
+
+
+class FailoverProvider:
+    """Claude first; OpenAI for any call where Claude can't be reached, and for the rest of
+    the match after ``SWITCH_AFTER`` connection failures in a row. Invalid answers are not
+    failed over (the agent's own retry handles those)."""
+
+    SWITCH_AFTER = 2
+
+    def __init__(self, primary: Any, backup: Any, log: Any = print) -> None:
+        self.primary, self.backup, self._log = primary, backup, log
+        self._failures = 0
+        self._switched = False
+
+    @property
+    def model(self) -> str:
+        return self.backup.model if self._switched else self.primary.model
+
+    def __repr__(self) -> str:
+        return f"FailoverProvider({self.primary!r} -> {self.backup!r})"
+
+    def complete_structured(
+        self, messages: list[dict], schema_name: str, schema: dict, *, timeout: float | None = None
+    ) -> dict:
+        if not self._switched:
+            try:
+                answer = self.primary.complete_structured(messages, schema_name, schema, timeout=timeout)
+                self._failures = 0
+                return answer
+            except ProviderError as exc:
+                if "APIConnectionError" not in str(exc) and "APITimeoutError" not in str(exc):
+                    raise
+                self._failures += 1
+                if self._failures >= self.SWITCH_AFTER:
+                    self._switched = True
+                    self._log(f"[llm] Claude unreachable {self._failures} times in a row ({exc}); "
+                              f"using {self.backup.model} for the rest of this match")
+                else:
+                    self._log(f"[llm] Claude unreachable ({exc}); this call goes to {self.backup.model}")
+        return self.backup.complete_structured(messages, schema_name, schema, timeout=timeout)
 
 
 def _thinking_off(model: str) -> dict | None:
@@ -237,14 +293,20 @@ def provider_from_env() -> LLMProvider:
     """Claude when ``ANTHROPIC_API_KEY`` is set (``CLAUDE_MODEL``, default
     ``claude-sonnet-5-5``; ``CLAUDE_EFFORT``, default ``low``), else OpenAI
     (``OPENAI_API_KEY``, ``OPENAI_MODEL``, ``OPENAI_BASE_URL``).
-    ``LLM_PROVIDER=openai`` picks OpenAI even with both keys set."""
+    ``LLM_PROVIDER=openai`` picks OpenAI even with both keys set. With both keys,
+    calls fail over to OpenAI when Claude can't be reached (``FailoverProvider``)."""
+    api_key = os.environ.get("OPENAI_API_KEY")
     if os.environ.get("ANTHROPIC_API_KEY") and os.environ.get("LLM_PROVIDER", "").lower() != "openai":
-        return ClaudeProvider(
+        claude = ClaudeProvider(
             model=os.environ.get("CLAUDE_MODEL") or DEFAULT_CLAUDE_MODEL,
             effort=os.environ.get("CLAUDE_EFFORT") or DEFAULT_CLAUDE_EFFORT,
             thinking=(os.environ.get("CLAUDE_THINKING") or DEFAULT_CLAUDE_THINKING).lower(),
         )
-    api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            return claude
+        openai = OpenAIProvider(api_key, os.environ.get("OPENAI_MODEL") or DEFAULT_OPENAI_MODEL,
+                                base_url=os.environ.get("OPENAI_BASE_URL") or DEFAULT_OPENAI_BASE_URL)
+        return FailoverProvider(claude, openai)
     if not api_key:
         raise RuntimeError("Neither ANTHROPIC_API_KEY nor OPENAI_API_KEY is set — add one to your environment "
                            "or the starter's .env.")

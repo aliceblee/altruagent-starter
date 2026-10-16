@@ -84,12 +84,13 @@ def test_falls_back_to_plain_requests_when_server_fallbacks_are_unavailable():
 
 def test_provider_from_env_prefers_claude(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     provider = provider_from_env()
     assert isinstance(provider, ClaudeProvider)
     assert (provider.model, provider.effort) == (providers.DEFAULT_CLAUDE_MODEL, "low") == ("claude-sonnet-5-5", "low")
     monkeypatch.setenv("CLAUDE_MODEL", "claude-haiku-5-5")
     assert provider_from_env().model == "claude-haiku-5-5"
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setenv("LLM_PROVIDER", "openai")
     assert isinstance(provider_from_env(), OpenAIProvider)
 
@@ -156,3 +157,55 @@ def test_bad_request_errors_say_why():
     err.message = "thinking.type.between_tools is not supported for this model"
     with pytest.raises(ProviderError, match="not supported for this model"):
         ClaudeProvider(FakeClient(err)).complete_structured(MESSAGES, "x", SCHEMA)
+
+
+class _Stub:
+    def __init__(self, model, *results):
+        self.model, self.results, self.calls = model, list(results), 0
+
+    def complete_structured(self, messages, schema_name, schema, *, timeout=None):
+        self.calls += 1
+        result = self.results.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+
+def test_failover_uses_openai_when_claude_is_unreachable_then_sticks_to_it():
+    from examples.llm.providers import FailoverProvider
+
+    down = ProviderError("Claude request failed (APIConnectionError): ConnectError: refused")
+    claude = _Stub("claude-sonnet-5-5", down, down)
+    openai = _Stub("gpt", {"a": 1}, {"a": 2}, {"a": 3})
+    provider = FailoverProvider(claude, openai, log=lambda _m: None)
+    assert [provider.complete_structured([], "x", {}) for _ in range(3)] == [{"a": 1}, {"a": 2}, {"a": 3}]
+    assert claude.calls == 2 and provider.model == "gpt"  # stopped trying Claude after 2 failures
+
+
+def test_failover_does_not_hide_bad_answers():
+    from examples.llm.providers import FailoverProvider
+
+    provider = FailoverProvider(_Stub("c", ProviderError("the model's reply was not valid JSON")), _Stub("gpt"))
+    with pytest.raises(ProviderError, match="not valid JSON"):
+        provider.complete_structured([], "x", {})
+
+
+def test_connection_errors_name_their_root_cause():
+    try:
+        try:
+            raise OSError("[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed")
+        except OSError as inner:
+            raise RuntimeError("Connection error.") from inner
+    except RuntimeError as exc:
+        err = exc
+    with pytest.raises(ProviderError, match="CERTIFICATE_VERIFY_FAILED"):
+        ClaudeProvider(FakeClient(err)).complete_structured(MESSAGES, "x", SCHEMA)
+
+
+def test_with_both_keys_other_games_fail_over_to_openai(monkeypatch):
+    from examples.llm.providers import FailoverProvider
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    provider = provider_from_env()
+    assert isinstance(provider, FailoverProvider) and isinstance(provider.primary, ClaudeProvider)

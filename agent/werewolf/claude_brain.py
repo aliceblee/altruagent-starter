@@ -60,6 +60,7 @@ END_ANYTIME_SECONDS = 25.0  # with less time left than this, Claude may end its 
 SERVER_MAX_CHATS = 5  # the server's limit; past our own MAX_CHATS_PER_DAY only for important news
 NOTES_LIMIT = 1500
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
+UNREACHABLE_LIMIT = 3  # connection failures in a row before we stop calling Claude this game
 PLAYBOOK = Path(__file__).with_name("playbook.md")
 # Patterns learned from past games (agent/werewolf/learn.py writes it; WEREWOLF_LEARNED=0 leaves it out).
 LEARNED = Path(__file__).with_name("learned.md")
@@ -171,6 +172,7 @@ class ClaudeWerewolfAgent:
         self._sent_today = 0
         self._ended_today = False
         self._use_fallbacks = True
+        self._unreachable = 0  # connection failures in a row
         # What Claude owes a reply to: seat -> "accused you" / "asked you", since our last message.
         self._owed: dict[int, str] = {}
         self._accusations_read = 0
@@ -570,11 +572,20 @@ class ClaudeWerewolfAgent:
             output_config={"effort": effort, "format": {"type": "json_schema", "schema": schema}},
             timeout=timeout,
         )
+        if self._unreachable >= UNREACHABLE_LIMIT:
+            return None  # Claude is unreachable this game: the rule engine plays, without waiting
         try:
             response = self._create(request)
         except Exception as exc:  # noqa: BLE001 - any API failure: the rule engine plays
-            self.log(f"[claude] request failed after {self.clock() - started:.1f}s: {type(exc).__name__}: {exc}")
+            self.log(f"[claude] request failed after {self.clock() - started:.1f}s: {type(exc).__name__}: {exc}"
+                     f"{_cause(exc)}")
+            if type(exc).__name__ in ("APIConnectionError", "APITimeoutError"):
+                self._unreachable += 1
+                if self._unreachable >= UNREACHABLE_LIMIT:
+                    self.log(f"[claude] unreachable {self._unreachable} times in a row; "
+                             "the rule engine plays the rest of this game")
             return None
+        self._unreachable = 0
         ms = round((self.clock() - started) * 1000)
         if response.stop_reason == "refusal":
             self.log(f"[claude] refused ({ms} ms)")
@@ -671,6 +682,11 @@ def _read_learned() -> str:
         return LEARNED.read_text(encoding="utf-8")
     except OSError:
         return ""
+
+
+def _cause(exc: BaseException) -> str:
+    inner = exc.__cause__ or exc.__context__
+    return f" (cause: {type(inner).__name__}: {str(inner)[:200]})" if inner is not None else ""
 
 
 def _describe_message(decision: Any) -> str:

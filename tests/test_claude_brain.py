@@ -449,3 +449,14 @@ def test_a_plain_wolf_call_without_a_vote_still_gets_an_instant_reply():
     msg = brain(client).choose_message(chat_state(me=0, observation="Your role: villager.", day=2,
                                                   messages=[(2, "Player0 is the wolf here, no doubt.")]), ctx(0))
     assert any(msg.content == d.format(who="Player2") for d in DENIALS) and client.requests == []
+
+
+def test_unreachable_claude_is_dropped_for_the_rest_of_the_game():
+    class APIConnectionError(Exception):
+        pass
+
+    client = FakeClient(*[APIConnectionError("Connection error.") for _ in range(3)])
+    b = brain(client)
+    for _ in range(5):
+        assert b.choose_action(vote_state(), ctx(6)).action_id != "7"  # the rule engine plays
+    assert len(client.requests) == 3  # no calls after the third failure
