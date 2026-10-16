@@ -18,10 +18,20 @@ no code needed. Keep it short.
 1. Deploy the MCV.
 2. Power plant (powr), then **refinery (proc) right away** (it brings a
    harvester), then barracks (tent/barr), then a **second refinery**.
-3. War factory (weap), then more harvesters (harv) until each refinery has
-   about two. Add power whenever power_drained is close to power_provided.
-- Never queue a building you already have in the queue or ready to place;
-  place finished buildings at once (place without `at`).
+3. War factory (weap), placed by about 100 s. Until it is placed, train at
+   most 4-5 riflemen: the money goes to the war factory and refineries first.
+   (In testing we trained infantry nonstop from the barracks and the war
+   factory wasn't placed until 156-240 s; the first tank came at 2-6 minutes.)
+4. **The war factory's first unit is a harvester (harv)**, then tanks. Keep
+   about two harvesters per refinery all game (in 9 of 13 test games we never
+   trained a single extra harvester).
+5. Keep power ahead of demand: add a power plant before the war factory and
+   whenever power_drained gets close to power_provided. Low power slows every
+   queue.
+- Never queue a building you already have in the queue or ready to place, and
+  **never cancel a building that's in progress**: cancelling throws its
+  progress away (the code blocks cancelling the only copy). Place finished
+  buildings at once (place without `at`).
 - Keep harvesters harvesting; if one is idle or under attack, send it back to
   the ore and defend it.
 - **Your money is cash plus stored ore.** In OpenRA, ore sitting in refineries
@@ -29,9 +39,9 @@ no code needed. Keep it short.
   stored is not broke: keep queuing. If ore storage is full, harvesters can't
   unload and income stops: build a silo (or spend) at once. In testing we
   sat at "cash is zero, waiting for income" for 7 minutes with ore stored.
-- Keep about two harvesters per refinery, and rebuild a lost harvester before
-  anything else. One harvester can't feed a war factory (in testing we had
-  "the lone harvester" for most of a match and trained 2 tanks in 10 minutes).
+- Rebuild a lost harvester before anything else. One harvester can't feed a
+  war factory (in testing we had "the lone harvester" for most of a match and
+  trained 2 tanks in 10 minutes).
 
 ## Army
 

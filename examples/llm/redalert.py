@@ -703,15 +703,25 @@ def over_queued(state: dict[str, Any]) -> list[dict[str, Any]]:
 
 def drop_requeued_buildings(orders: list[dict[str, Any]], state: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
     """``orders`` without a ``build`` of a building or defense that is already in production
-    (queued, in progress or ready to place), or built twice in one batch. Test games: the
+    (queued, in progress or ready to place), or built twice in one batch, and without a
+    ``cancel`` of the only copy of a building in production. Test games: the
     model queued two refineries and two barracks at once again and again, tying up all the
     cash. A second refinery is still fine once the first has been placed."""
-    busy = {str(p.get("item") or "").lower() for p in _list(_dict(state.get("observation")), "production")
-            if str(p.get("queue")).lower() in ("building", "defense")}
+    counts: dict[str, int] = {}
+    for p in _list(_dict(state.get("observation")), "production"):
+        if str(p.get("queue")).lower() in ("building", "defense"):
+            item = str(p.get("item") or "").lower()
+            counts[item] = counts.get(item, 0) + 1
+    busy = set(counts)
     kept, dropped = [], 0
     for order in orders:
         item = str(order.get("item") or "").lower()
         if order.get("cmd") == "build" and item and item in busy:
+            dropped += 1
+            continue
+        if order.get("cmd") == "cancel" and counts.get(item) == 1:
+            # The only copy in production: cancelling throws its progress away. In testing the
+            # model "cancelled duplicate war factories" twice and placed it at 240 s, not ~100 s.
             dropped += 1
             continue
         if order.get("cmd") == "build" and item:
@@ -824,7 +834,7 @@ class RedAlertPlayer:
         orders = self._drop_blocked(orders, raw)
         orders, requeued = drop_requeued_buildings(orders, raw)
         if requeued:
-            self._log(f"[llm] red_alert: dropped {requeued} build order(s) for buildings already in production")
+            self._log(f"[llm] red_alert: dropped {requeued} duplicate build / lone-cancel order(s)")
         reasoning = trim_reasoning(answer.get("reasoning_summary"))
         self._last_reasoning = reasoning
         if not orders:
