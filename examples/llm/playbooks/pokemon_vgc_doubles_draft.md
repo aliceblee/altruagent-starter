@@ -16,10 +16,9 @@ English; change the strategy here, no code needed. Keep it short.
     least one hitting hard on each side (physical and special).
   - **Redirection or disruption** if offered (Amoonguss Rage Powder, screens,
     Taunt) and a way to handle Fairy, Dragon and Steel types.
-- First picks: if a top threat is in the pool (Flutter Mane, Urshifu,
-  Chien-Pao...), take it before Incineroar: in test games we took Incineroar
-  first every time and the opponent's Flutter Mane + Urshifu lead knocked out
-  both our leads within two turns, twice.
+- First pick: the strongest, most flexible Pokémon in the pool, usually
+  Incineroar (Fake Out + Intimidate + Parting Shot) or a top threat such as
+  Flutter Mane, Urshifu or Chien-Pao. Take whichever fits the pool better.
 - Later picks: fill the role you're missing, and deny the opponent the one
   piece their team obviously needs (their only speed control, their counter
   to your main attacker).
@@ -36,8 +35,9 @@ English; change the strategy here, no code needed. Keep it short.
   Farigiraf / Cresselia in the back and set speed control only after both
   leads had fainted.
 - Keep a Pokémon in the back that handles their scariest threat.
-- **Always bring your speed control** (Tailwind / Trick Room / Icy Wind user):
-  in testing we drafted Cresselia twice and left it home both times.
+- **Always bring your speed control** (Tailwind / Trick Room / Icy Wind user).
+  In testing, every game where we drafted it and left it home was a loss
+  (Cresselia twice, Whimsicott, Indeedee); with it brought we won half.
 - If they have Amoonguss (Spore, Rage Powder), bring a Grass type or a
   Safety Goggles / Overcoat user: a sleeping Pokémon loses the game for you.
 
