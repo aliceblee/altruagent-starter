@@ -44,6 +44,8 @@ class GameMemory:
         self._seen: set[int] = set()
         self._observation: str | None = None
         self._private: dict[str, Any] = {}
+        self._teams: dict[int, str] = {}
+        self._names: dict[int, str] = {}  # seat -> display name as the server writes it (vote history uses it)
         self._written = False
 
     @property
@@ -64,7 +66,12 @@ class GameMemory:
                 self._chat.append({"day": day, "seq": m.index, "from": m.sender,
                                    "to": list(m.recipients), "text": m.content})
             self._observation = state.observation
-            from agent.werewolf.parsing import snapshot
+            from agent.werewolf.parsing import seat_teams, snapshot
+
+            self._teams = seat_teams(raw) or self._teams
+            for p in raw.get("players") or []:
+                if isinstance(p, dict) and isinstance(p.get("position"), int) and p.get("name"):
+                    self._names[p["position"]] = str(p["name"])[:120]
 
             snap, _ = snapshot(state, context.seat_position)
             self._private = {"role": snap.role, "partners": sorted(snap.partners),
@@ -95,6 +102,8 @@ class GameMemory:
                 "agent": agent,
                 **self._private,
                 "outcome": outcome,
+                "teams": {str(k): v for k, v in sorted(self._teams.items())},
+                "names": {str(k): v for k, v in sorted(self._names.items())},
                 "returns": getattr(final_state, "returns", None),
                 "observation": getattr(final_state, "observation", None) or self._observation,
                 "last_observation": self._observation,

@@ -342,3 +342,15 @@ def test_claude_wolf_is_warned_when_its_partner_just_pushed_a_target():
     b = brain(client)
     b.choose_message(chat_state(observation=wolf, day=2, messages=[(1, "I'm voting Player3, they dodged.")]), ctx(6))
     assert "Your partner Player1 just pushed Player3" in client.requests[0]["messages"][0]["content"]
+
+
+def test_claude_sees_which_team_sits_in_each_seat():
+    s = chat_state(day=2)
+    s.raw["players"] = [{"position": 0, "name": "Yuriko Red (Player0, Self-hosted)"},
+                        {"position": 6, "name": "alime588 (Player6, Self-hosted)"},
+                        {"position": 2, "name": "alime588 (Player2, Self-hosted)"}]
+    client = FakeClient(_send("Hello."))
+    brain(client).choose_message(s, ctx(6))
+    prompt = client.requests[0]["messages"][0]["content"]
+    assert 'Player0 = "Yuriko Red"' in prompt and 'Player6 = "alime588" (you)' in prompt
+    assert 'Player2 = "alime588" (another copy of our agent' in prompt

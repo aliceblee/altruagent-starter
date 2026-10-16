@@ -450,6 +450,28 @@ _PLAIN_QUOTES = str.maketrans({"\u2019": "'", "\u2018": "'", "\u201b": "'", "\u0
                                 "\u201c": '"', "\u201d": '"', "\u201e": '"'})
 
 
+_TEAM_SUFFIX = re.compile(r"\s*\((?:Player\s*\d+\s*,\s*)?[^()]*\)\s*$")
+
+
+def team_name(display_name: Any, limit: int = 40) -> str:
+    """The team behind a seat's display name ("Yuriko Red (Player2, Self-hosted)" -> "Yuriko Red"),
+    as plain printable text of bounded length: other contestants choose these names, so they're
+    data, never instructions."""
+    name = _TEAM_SUFFIX.sub("", str(display_name or ""))
+    name = "".join(ch for ch in name if ch.isprintable() and ch not in "\"`<>{}[]").strip()
+    return name[:limit].strip() or "?"
+
+
+def seat_teams(raw: Any) -> dict[int, str]:
+    """{seat: team name} from a state's ``players`` list (empty when the server sends none)."""
+    players = raw.get("players") if isinstance(raw, dict) else None
+    out = {}
+    for p in players or []:
+        if isinstance(p, dict) and isinstance(p.get("position"), int) and p.get("name"):
+            out[p["position"]] = team_name(p["name"])
+    return out
+
+
 def plain_quotes(text: str) -> str:
     """Curly quotes as straight ones, so our patterns read "I’m the Seer" (as OpenAI models write it)
     the same as "I'm the Seer"."""
