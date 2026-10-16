@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import re
 import time
 from pathlib import Path
@@ -72,6 +73,36 @@ _SILENCE_CLAIM = re.compile(
     r"(?:has|have)n[’']?t heard (?:anything )?from|not heard (?:anything )?from)\b", re.I)
 # Owning up to an earlier claim ("calling Player5 silent was my mistake") is the opposite and is fine.
 _ADMISSION = re.compile(r"\b(?:mistake|wrong(?:ly)?|my bad|sorry|retract\w*|apolog\w*|I misread)\b", re.I)
+# Instant replies when we're accused, sent without waiting for Claude (LLM tables pile on within
+# a second; Claude takes 3-5 s). The same wording for every role, except a wolf counterclaiming a
+# seer who named it. Claude follows up with specifics on its next turn.
+DENIALS = (
+    "{who}, that's wrong. I'm not a wolf, and pushing me with nothing behind it is exactly what a wolf would do.",
+    "No, {who}. I'm not a wolf. You're pushing me with no real case, and that's what worries me about you.",
+    "{who}, you've got the wrong player. I'm not a wolf, and I'd like to know why you're so quick to push me.",
+)
+FAKE_SEER_REPLIES = (
+    "That's false: {who} is lying about me. I'm not a wolf, so that 'check' is made up, and a fake seer is a wolf. "
+    "I'm voting {who}.",
+    "{who}'s claim on me is a lie. I'm not a wolf, so {who} can't be the real seer, and a fake seer is a wolf. "
+    "I'm voting {who}.",
+)
+COUNTERCLAIMS = (
+    "That's false. I'm the Seer, and I checked {who} last night: wolf. A wolf claiming first to frame the seer is "
+    "the oldest trick. I'm voting {who}.",
+    "{who} is lying. I'm the real Seer, and my check last night was {who}: wolf. They're framing me before I could "
+    "speak. I'm voting {who}.",
+)
+# A clear accusation of seat {me} in one message: "Player0 is a wolf / lying", "vote Player0",
+# "lynch Player0", "Player0 must be the wolf". Not "Player0's wolf check" (a possessive) or a mention.
+def _accuses(text: str, me: int) -> bool:
+    who = rf"(?:player\s*|p){me}\b(?![’']s)"
+    return bool(re.search(
+        rf"\b{who}\s+(?:is|must be|has to be|looks like|seems like|is clearly|is obviously|could be)\s+"
+        rf"(?:a\s+|the\s+|our\s+)?(?:wolf|werewolf|lying|liar|fake)"
+        rf"|\b(?:vote|voting|lynch|eliminate|eliminating|lynching)\s+(?:out\s+)?\b{who}", text, re.I))
+
+
 # Our own vote announcements ("I'm voting Player3", "my vote stays on Player3"); the last one counts.
 _OUR_VOTE = re.compile(r"\b(?:I'?m|I am|I'll|I will)\s+(?:\w+\s+){0,2}?vot(?:ing|e)\s+(?:for\s+|on\s+)?player\s*(\d)\b"
                        r"|\bmy vote (?:is|stays|goes|remains)\s+(?:on\s+|with\s+)?player\s*(\d)\b", re.I)
@@ -151,6 +182,9 @@ class ClaudeWerewolfAgent:
         self._announced: dict[Any, int] = {}  # day -> the seat we last said publicly we'd vote for
         self._open_wolves: set[int] = set()  # seer: found wolves already fair game when we last spoke
         self._snap: Any = None
+        self._rebutted: set[tuple[Any, int]] = set()  # (day, accuser) we've answered instantly
+        self._follow_up: str = ""  # what Claude must back up on its next turn
+        self._rng = random.Random()
 
     # -- runtime hooks ----------------------------------------------------------------------
 
@@ -193,7 +227,7 @@ class ClaudeWerewolfAgent:
         self._snap = snap
         if self._chat_day != snap.day:
             self._chat_day, self._sent_today, self._ended_today = snap.day, 0, False
-            self._owed = {}
+            self._owed, self._follow_up = {}, ""
             self._claims_known = set(self.advisor.chat.seer_claims)
         advice = self.advisor.choose_message(state, context)
         self._note_owed(snap)
@@ -216,6 +250,9 @@ class ClaudeWerewolfAgent:
         if isinstance(advice, SendMessage) and advice.content == SEER_ALLY_LINE:
             self.log(f"[claude] tells Player{advice.recipients[0]} privately (seer ally): {SEER_ALLY_LINE}")
             return self._sent(advice, None)
+        instant = self._instant_reply(snap)
+        if instant is not None:
+            return self._sent(instant, None)
         left = state.raw.get("messaging_seconds_left")
         if isinstance(left, (int, float)) and left < MIN_SECONDS_FOR_CLAUDE:
             return self._sent(advice, "little discussion time left")
@@ -224,7 +261,7 @@ class ClaudeWerewolfAgent:
         recipients = ["everyone"] + [f"Player{s}" for s in others]
         owed = [f"Player{seat} {why}" for seat, why in sorted(self._owed.items()) if seat in snap.alive]
         nearly_up = isinstance(left, (int, float)) and left < END_ANYTIME_SECONDS
-        may_end = nearly_up or not (owed or self._fresh)
+        may_end = nearly_up or not (owed or self._fresh or self._follow_up)
         if may_end:
             choice = ("Either send one message (decision 'send') or end your part of today's discussion "
                       "(decision 'end').")
@@ -235,6 +272,9 @@ class ClaudeWerewolfAgent:
                       "Answer it: if someone raised a concern about you or asked your opinion, reply to them by "
                       "name and share your current read discreetly, in words, never numbers.")
         choice += self._seer_wolf_hint(snap) + self._partner_push_hint(snap)
+        if self._follow_up:
+            choice += (f" You just answered an accusation in a quick line: \"{self._follow_up}\". Now back it up "
+                       "firmly with specifics from the chat and votes, and keep the same stance and vote.")
         if news:
             choice += (f" You had finished talking for today, but since your last message: {news}. Say how this "
                        "changes your read and your vote (if you change your vote, say why).")
@@ -353,6 +393,51 @@ class ClaudeWerewolfAgent:
                              "never how you know. Keep it mild; don't claim seer.")
         return " " + " ".join(hints)
 
+    def _instant_reply(self, snap: Any) -> SendMessage | None:
+        """A fast, firm answer to a new accusation of us (or a seer claim naming us a wolf), sent
+        without calling Claude; Claude backs it up next turn."""
+        if self._sent_today >= SERVER_MAX_CHATS - 1:  # keep the last message for Claude's follow-up
+            return None
+        chat = self.advisor.chat
+        latest = {}  # each player's latest public message today
+        for m in self.transcript:
+            if m["day"] == snap.day and m["to"] == "everyone" and m["from"].startswith("Player"):
+                latest[int(m["from"][len("Player"):])] = m["text"]
+        accusers = [seat for seat, why in sorted(self._owed.items())
+                    if why == "raised a concern about you" and seat in snap.alive and seat not in snap.partners
+                    and self._accuses_us(snap, seat, latest.get(seat, ""))]
+        claimants = [c for c in chat.seer_claims if chat.claimed_results.get(c, {}).get(snap.me) == WOLF
+                     and c in snap.alive and c != snap.me]
+        fresh = [s for s in claimants + accusers if (snap.day, s) not in self._rebutted]
+        if not fresh:
+            return None
+        who = fresh[0]
+        self._rebutted.add((snap.day, who))
+        if who in claimants:
+            if snap.role == WOLF:
+                if snap.partners & {who}:
+                    return None
+                text = self._rng.choice(COUNTERCLAIMS)
+            elif snap.role == SEER and snap.day <= 1:
+                text = self._rng.choice(DENIALS)  # the seer still never claims on day 1
+            else:
+                text = self._rng.choice(FAKE_SEER_REPLIES)
+        else:
+            text = self._rng.choice(DENIALS)
+        text = text.format(who=f"Player{who}")
+        self._follow_up = text
+        self.log(f"[claude] instant reply to Player{who}: {text}")
+        return SendMessage(text)
+
+    def _accuses_us(self, snap: Any, seat: int, latest: str) -> bool:
+        """A clear accusation by ``seat``: their vote today is on us, or (no vote announced) their
+        latest message plainly calls us a wolf. A player voting someone else isn't accusing us, even
+        when they quote or report a push on us ("Player5 urged me to vote Player0")."""
+        intent = self.advisor.chat.intents_on(snap.day).get(seat)
+        if intent is not None:
+            return intent == snap.me
+        return _accuses(plain_quotes(latest), snap.me)
+
     def _news(self, snap: Any) -> str:
         """What is worth speaking again for after we ended: a new seer claim, or someone accusing,
         questioning or correcting us since our last message. Empty when nothing."""
@@ -361,6 +446,8 @@ class ClaudeWerewolfAgent:
         items += [f"Player{seat} {why}" for seat, why in sorted(self._owed.items()) if seat in snap.alive]
         items += [f"Player{w} (your night-1 wolf) accused someone" for w in self._fair_game_wolves(snap)
                   if w not in self._open_wolves]
+        if self._follow_up:
+            items.append("you still owe the table the specifics behind your quick reply")
         return "; ".join(items)
 
     def _fair_game_wolves(self, snap: Any) -> list[int]:
@@ -390,6 +477,8 @@ class ClaudeWerewolfAgent:
             self._sent_today += 1
             self._owed, self._fresh = {}, 0
             self._claims_known = set(self.advisor.chat.seer_claims)
+            if decision.content != self._follow_up:
+                self._follow_up = ""
             self._open_wolves = set(self._fair_game_wolves(self._snap)) if self._snap is not None else set()
         else:
             self._ended_today = True

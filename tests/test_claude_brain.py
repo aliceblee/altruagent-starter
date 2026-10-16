@@ -152,6 +152,7 @@ def _decisions(request):
 def test_claude_may_not_end_while_accused():
     client = FakeClient({"notes": "", "decision": "send", "recipient": "Player2", "message": "Player2, I'm a villager."})
     b = brain(client)
+    b._rebutted.add((2, 2))  # the instant denial already went out; this is Player2 pushing again
     msg = b.choose_message(chat_state(day=2, messages=[(2, "Player6 is a wolf, I'm voting Player6.")]), ctx(6))
     assert _decisions(client.requests[0]) == ["send"]
     assert "Player2 raised a concern about you" in client.requests[0]["messages"][0]["content"]
@@ -179,7 +180,9 @@ def test_claude_may_end_when_time_is_nearly_up():
     client = FakeClient({"notes": "", "decision": "end", "recipient": "everyone", "message": ""})
     s = chat_state(day=2, messages=[(2, "Player6 is a wolf.")])
     s.raw["messaging_seconds_left"] = 20
-    assert brain(client).choose_message(s, ctx(6)) is TERMINATE_MESSAGING
+    b = brain(client)
+    b._rebutted.add((2, 2))  # already answered instantly
+    assert b.choose_message(s, ctx(6)) is TERMINATE_MESSAGING
     assert _decisions(client.requests[0]) == ["send", "end"]
 
 
@@ -279,7 +282,10 @@ def test_after_ending_claude_speaks_again_only_when_accused():
     assert len(client.requests) == 1  # nothing important: no Claude call
     msg = b.choose_message(chat_state(day=2, messages=[(1, "Hello."), (2, "Player6 is a wolf, I'm voting Player6.")]),
                            ctx(6))
-    assert isinstance(msg, SendMessage) and len(client.requests) == 2
+    assert isinstance(msg, SendMessage) and msg.content.count("Player2") and len(client.requests) == 1  # instant
+    msg = b.choose_message(chat_state(day=2, messages=[(1, "Hello."), (2, "Player6 is a wolf, I'm voting Player6."),
+                                                       (3, "Hm.")]), ctx(6))
+    assert isinstance(msg, SendMessage) and len(client.requests) == 2  # then Claude backs it up
 
 
 def test_the_vote_request_reminds_claude_of_its_announced_vote():
@@ -370,3 +376,76 @@ def test_claude_gets_a_live_read_of_each_players_style():
     assert "- Player3: 2 messages; accused" in read and "Player1, Player5" in read
     assert "1 vote(s)" in read and "with the lynch 1" in read
     assert "Player2:" not in read  # the dead aren't read
+
+
+def test_a_wolf_named_by_a_seer_claim_counterclaims_instantly_then_claude_backs_it_up():
+    from agent.werewolf.claude_brain import COUNTERCLAIMS
+
+    wolf = "You are Player0. Your role: wolf. Your fellow wolves: Player4."
+    client = FakeClient(_send("Player5 named me with a convenient 'check'; it fits a wolf's script."))
+    b = brain(client)
+    b.choose_message(chat_state(me=0, observation=wolf, day=1), ctx(0))  # the opener
+    talk = [(5, "I'm the Seer. I investigated Player0 and they are a wolf. Vote Player0.")]
+    msg = b.choose_message(chat_state(me=0, observation=wolf, day=1, messages=talk), ctx(0))
+    assert client.requests == []  # instant: no Claude call
+    assert any(msg.content == c.format(who="Player5") for c in COUNTERCLAIMS)
+    talk = talk + [(6, "Two claims now.")]
+    follow = b.choose_message(chat_state(me=0, observation=wolf, day=1, messages=talk), ctx(0))
+    prompt = client.requests[0]["messages"][0]["content"]
+    assert "You just answered an accusation in a quick line" in prompt and _decisions(client.requests[0]) == ["send"]
+    assert follow.content.startswith("Player5 named me")
+    assert b._announced[1] == 5  # the vote reminder will hold us to it
+
+
+def test_a_villager_named_by_a_lone_day1_claimant_calls_it_a_lie_and_may_vote_them():
+    from agent.werewolf.claude_brain import FAKE_SEER_REPLIES
+
+    client = FakeClient({"notes": "", "action_id": "5"})
+    b = brain(client)
+    b.choose_message(chat_state(day=1), ctx(6))  # the opener
+    talk = [(5, "I'm the Seer. I checked Player6: WOLF. Vote Player6.")]
+    msg = b.choose_message(chat_state(day=1, messages=talk), ctx(6))
+    assert any(msg.content == r.format(who="Player5") for r in FAKE_SEER_REPLIES) and client.requests == []
+    vote = b.choose_action(vote_state(messages=talk), ctx(6))
+    assert vote.action_id == "5"  # not spared: we know their claim on us is false
+
+
+def test_any_accusation_gets_one_instant_denial_per_accuser_per_day():
+    from agent.werewolf.claude_brain import DENIALS
+
+    client = FakeClient(_send("Here's why Player2 is wrong about me."), _send("More."))
+    b = brain(client)
+    talk = [(2, "Player6 is a wolf, I'm voting Player6.")]
+    msg = b.choose_message(chat_state(day=2, messages=talk), ctx(6))
+    assert any(msg.content == d.format(who="Player2") for d in DENIALS) and client.requests == []
+    talk = talk + [(2, "Still voting Player6.")]
+    b.choose_message(chat_state(day=2, messages=talk), ctx(6))
+    assert len(client.requests) == 1  # the second push from the same accuser goes to Claude
+
+
+def test_no_instant_reply_when_we_are_only_mentioned_not_accused():
+    # Live game: "Player3, you still haven't disputed Player0's wolf check. I'm voting Player3." got an
+    # instant "you've got the wrong player" from us.
+    client = FakeClient(_send("Agreed, Player3 hasn't answered."))
+    b = brain(client)
+    talk = [(6, "Player3, you still haven't disputed Player0's wolf check. I'm voting Player3.")]
+    msg = b.choose_message(chat_state(me=0, observation="Your role: seer.", day=2, messages=talk), ctx(0))
+    assert len(client.requests) == 1 and msg.content == "Agreed, Player3 hasn't answered."
+
+
+def test_no_instant_reply_to_a_player_who_reports_a_push_on_us_but_votes_someone_else():
+    # Live game: "Player5 ... privately urged me to vote Player0 ... I'm voting Player5" got "No, Player3. I'm not a wolf."
+    client = FakeClient(_send("Thanks, Player3. Player5's private pitch says it all."))
+    b = brain(client)
+    talk = [(3, "Player5 privately urged me to vote Player0 to split us. Player0 backed the real Seer. I'm voting Player5.")]
+    msg = b.choose_message(chat_state(me=0, observation="Your role: villager.", day=3, messages=talk), ctx(0))
+    assert len(client.requests) == 1 and msg.content.startswith("Thanks, Player3")
+
+
+def test_a_plain_wolf_call_without_a_vote_still_gets_an_instant_reply():
+    from agent.werewolf.claude_brain import DENIALS
+
+    client = FakeClient()
+    msg = brain(client).choose_message(chat_state(me=0, observation="Your role: villager.", day=2,
+                                                  messages=[(2, "Player0 is the wolf here, no doubt.")]), ctx(0))
+    assert any(msg.content == d.format(who="Player2") for d in DENIALS) and client.requests == []

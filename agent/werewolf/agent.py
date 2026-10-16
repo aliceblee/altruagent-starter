@@ -650,7 +650,10 @@ class WerewolfAgent:
 
     def _claim_disproved(self, snap: Snapshot, claimant: int, results: dict[int, str]) -> bool:
         """A seer claim the revealed roles have proved false: another player died as
-        the seer, or a "wolf" result died a non-wolf (or a "villager" result a wolf)."""
+        the seer, or a "wolf" result died a non-wolf (or a "villager" result a wolf). Also
+        one that calls us a wolf when we aren't: we know that's a lie."""
+        if claimant != snap.me and results.get(snap.me) == WOLF and snap.role not in (WOLF, None):
+            return True
         for seat, death in snap.dead.items():
             if death.role == SEER and seat != claimant:
                 return True
