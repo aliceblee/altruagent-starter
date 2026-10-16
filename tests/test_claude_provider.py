@@ -380,7 +380,26 @@ def test_red_alert_queues_harvesters_once_the_war_factory_stands():
     # The model's own "build harv" becomes a train, and nothing extra is queued.
     kept, _ = save_for_economy([{"cmd": "build", "item": "harv"}], state)
     assert kept == [{"cmd": "train", "item": "harv", "count": 1}]
-    # Enough harvesters: orders pass untouched.
-    rich = _ra_state(["fact", "powr", "proc", "tent", "weap"], units=["harv", "harv"], cash=400, available=["harv"])
+    # Enough harvesters and cash, a tank already queued: orders pass untouched.
+    rich = _ra_state(["fact", "powr", "proc", "tent", "weap"], units=["harv", "harv"], cash=2000,
+                     production=[{"queue": "Vehicle", "item": "1tnk"}], available=["harv", "1tnk"])
     orders = [{"cmd": "train", "item": "e1", "count": 5}]
     assert save_for_economy(orders, rich) == (orders, [])
+
+
+def test_red_alert_keeps_a_tank_in_production_and_holds_extras_before_the_war_factory():
+    from examples.llm.redalert import save_for_economy
+
+    state = _ra_state(["fact", "powr", "proc", "tent", "weap"], units=["harv", "harv"], cash=700,
+                      available=["e1", "harv", "1tnk", "2tnk"])
+    kept, notes = save_for_economy([{"cmd": "train", "item": "e1", "count": 5}, {"cmd": "build", "item": "pbox"}], state)
+    assert kept == [{"cmd": "train", "item": "2tnk", "count": 1}, {"cmd": "build", "item": "pbox"}] and len(notes) == 2
+    # "build 3tnk" is sent as a train, and counts as the tank.
+    kept, _ = save_for_economy([{"cmd": "build", "item": "3tnk"}], state)
+    assert kept == [{"cmd": "train", "item": "3tnk", "count": 1}]
+    early = _ra_state(["fact", "powr", "proc", "tent"], units=["harv"], power=(100, 90),
+                      production=[{"queue": "Building", "item": "weap"}])
+    orders = [{"cmd": "build", "item": "proc"}, {"cmd": "build", "item": "silo"}, {"cmd": "build", "item": "powr"},
+              {"cmd": "build", "item": "pbox"}]
+    kept, notes = save_for_economy(orders, early)
+    assert kept == [{"cmd": "build", "item": "powr"}, {"cmd": "build", "item": "pbox"}] and len(notes) == 2

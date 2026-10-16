@@ -743,6 +743,13 @@ POWER_PLANT_OUTPUT = 100
 HARVESTERS_PER_REFINERY = 2
 MAX_HARVESTERS_WANTED = 4
 SAVE_CASH_BELOW = 1000
+# Combat vehicles; once the economy runs, one is kept in production (the first
+# of TANK_PREFERENCE that is available).
+VEHICLE_TYPES = frozenset({"1tnk", "2tnk", "3tnk", "4tnk", "ftrk", "apc", "jeep", "arty", "v2rl", "ttnk", "ctnk", "mnly", "mrj", "mgg", "qtnk", "stnk", "dtrk"})
+TANK_PREFERENCE = ("2tnk", "3tnk", "1tnk", "ftrk", "jeep")
+# Buildings that wait until the war factory stands (a second refinery, barracks
+# or power plant are handled separately).
+HOLD_BEFORE_WAR_FACTORY = frozenset({"silo", "dome", "fix", "kenn", "hpad", "afld", "spen", "syrd", "atek", "stek", "iron", "pdox", "mslo", "gap"})
 
 
 def _types(items: list[dict[str, Any]]) -> list[str]:
@@ -750,27 +757,38 @@ def _types(items: list[dict[str, Any]]) -> list[str]:
 
 
 def save_for_economy(orders: list[dict[str, Any]], state: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
-    """``orders`` adjusted so the economy comes first, and what was changed.
+    """``orders`` adjusted so the economy and the war factory come first, and what was changed.
 
-    Test games (16 vs GPT-6.1): the model trained 15-20 riflemen and queued extra
-    power plants before the war factory, so cash hit zero, the war factory's
-    progress stalled and it was placed at 150-240 s; then it ran a whole game on
-    one harvester with no cash and built no tanks. So, until a war factory stands:
-    infantry is capped at INFANTRY_BEFORE_WAR_FACTORY and a power plant is not
-    queued while power covers the war factory. Once harvesters can be trained:
-    while they are short, one is queued when none is, and infantry waits while
-    cash is below SAVE_CASH_BELOW."""
+    Test games (19 vs GPT-6.1): the model trained 15-20 riflemen and queued extra
+    power plants, a second refinery or a silo ahead of the war factory, so cash
+    hit zero and the war factory was placed at 150-240 s; afterwards it kept
+    spending on infantry, ran on one harvester and built no tanks in 4 of 19
+    games (every loss had 0-2 tanks, against light tanks). So, until a war
+    factory stands: infantry is capped at INFANTRY_BEFORE_WAR_FACTORY, a power
+    plant waits while power covers the war factory, and a second refinery or
+    barracks and the HOLD_BEFORE_WAR_FACTORY buildings wait. Once harvesters can
+    be trained: while they are short, one is queued when none is; then a tank is
+    kept in production; infantry waits while cash is below SAVE_CASH_BELOW.
+    ``build`` of a unit becomes ``train`` (units are trained, not built)."""
     obs = _dict(state.get("observation"))
     buildings = _types(_list(obs, "buildings"))
     units = _types(_list(obs, "units"))
     production = _list(obs, "production")
     queued = [str(p.get("item") or "").lower() for p in production if not p.get("ready")]
+    in_production = [str(p.get("item") or "").lower() for p in production]
     economy = _dict(obs.get("economy"))
     cash = economy.get("cash")
     available = {str(x).lower() for x in obs.get("available_production") or []}
     if not buildings:
         return orders, []
     notes: list[str] = []
+    fixed = []
+    for order in orders:
+        item = str(order.get("item") or "").lower()
+        if order.get("cmd") == "build" and (item in INFANTRY_TYPES or item in VEHICLE_TYPES or item == HARVESTER):
+            order = {"cmd": "train", "item": item, "count": 1}
+        fixed.append(order)
+    orders = fixed
     kept: list[dict[str, Any]] = []
     if WAR_FACTORY not in buildings:
         room = INFANTRY_BEFORE_WAR_FACTORY - sum(t in INFANTRY_TYPES for t in units + queued)
@@ -789,12 +807,17 @@ def save_for_economy(orders: list[dict[str, Any]], state: dict[str, Any]) -> tup
                     notes.append(f"trimmed {item} to x{room} until the war factory")
                     order = {**order, "count": room}
                 room -= order.get("count", 1)
-            elif (
-                order.get("cmd") == "build" and item == POWER_PLANT and surplus is not None
-                and surplus >= WAR_FACTORY_POWER and (POWER_PLANT in buildings or POWER_PLANT in queued)
-            ):
-                notes.append("held a power plant: power covers the war factory")
-                continue
+            elif order.get("cmd") == "build":
+                have = buildings + in_production
+                if (
+                    item == POWER_PLANT and surplus is not None and surplus >= WAR_FACTORY_POWER
+                    and POWER_PLANT in have
+                ):
+                    notes.append("held a power plant: power covers the war factory")
+                    continue
+                if item in HOLD_BEFORE_WAR_FACTORY or (item in (REFINERY, *BARRACKS) and item in have):
+                    notes.append(f"held {item} until the war factory")
+                    continue
             kept.append(order)
         return kept, notes
     if HARVESTER not in available:
@@ -802,20 +825,22 @@ def save_for_economy(orders: list[dict[str, Any]], state: dict[str, Any]) -> tup
     refineries = buildings.count(REFINERY)
     wanted = min(MAX_HARVESTERS_WANTED, HARVESTERS_PER_REFINERY * max(1, refineries))
     harvesters = units.count(HARVESTER) + queued.count(HARVESTER)
-    if harvesters >= wanted:
-        return orders, notes
-    asked = any(o.get("cmd") in ("train", "build") and str(o.get("item") or "").lower() == HARVESTER for o in orders)
+    asked = {str(o.get("item") or "").lower() for o in orders if o.get("cmd") == "train"}
     for order in orders:
         item = str(order.get("item") or "").lower()
-        if order.get("cmd") == "build" and item == HARVESTER:
-            order = {"cmd": "train", "item": HARVESTER, "count": 1}  # harvesters are trained, not built
         if order.get("cmd") == "train" and item in INFANTRY_TYPES and _is_int(cash) and cash < SAVE_CASH_BELOW:
-            notes.append(f"held {item}: cash {cash} goes to harvesters first")
+            notes.append(f"held {item}: cash {cash} goes to harvesters and tanks first")
             continue
         kept.append(order)
-    if HARVESTER not in queued and not asked:
-        kept.insert(0, {"cmd": "train", "item": HARVESTER, "count": 1})
-        notes.append(f"queued a harvester ({harvesters} of {wanted})")
+    if harvesters < wanted:
+        if HARVESTER not in queued and HARVESTER not in asked:
+            kept.insert(0, {"cmd": "train", "item": HARVESTER, "count": 1})
+            notes.append(f"queued a harvester ({harvesters} of {wanted})")
+        return kept, notes
+    tank = next((t for t in TANK_PREFERENCE if t in available), None)
+    if tank and not any(t in VEHICLE_TYPES for t in queued) and not (asked & VEHICLE_TYPES):
+        kept.insert(0, {"cmd": "train", "item": tank, "count": 1})
+        notes.append(f"queued a {tank}: no tank in production")
     return kept, notes
 
 
