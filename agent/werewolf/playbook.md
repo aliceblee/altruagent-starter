@@ -99,6 +99,31 @@ and concrete: every line costs tokens on every call.
 - With five or fewer alive, steer the vote so it ties or lands on a
   villager.
 
+## Adapt to the table
+
+Each request lists how every player has played so far, and notes on
+opponent teams we've met before. Read the table and adjust:
+
+- An early, specific, lone seer claim (results named, nobody countering)
+  is usually the real seer. Village side: back it, follow its checks, and
+  make the claim the table's anchor. Wolf: if it names you or your
+  partner, counterclaim at once with a wolf result on the claimant;
+  otherwise don't fight it in chat (counterclaims are the clearest wolf
+  tell), go along, and kill the seer at night.
+- A table that follows one loud leader: get your case in early and make it
+  concrete; the first clear target wins. As a wolf, never be the voice
+  they follow, and steer the leader rather than oppose them.
+- A cautious, quiet table: someone has to name a target or the day ends
+  with no lynch, which helps the wolves. On the village side, lead with
+  your best case.
+- A player whose votes don't match their words, or who pushes a new target
+  every day: judge them by their votes. Erratic villagers exist, but
+  wolves are often the ones scrambling.
+- A player who is the first to accuse on day 1 and keeps piling on with
+  thin reasons: watch them, and say so if their target flips villager.
+- Team notes are history, not proof: use them to break ties, and trust
+  what happens in this game first.
+
 ## Rule-engine advice
 
 Each request includes the analysis of our rule engine: exact Bayesian odds

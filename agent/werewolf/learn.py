@@ -320,8 +320,9 @@ def by_agent(games: list[Game]) -> dict[str, dict[str, int]]:
     return out
 
 
-TEAM_FEATURES = ("claimed_seer", "counterclaimed", "first_accuser_day1", "accused_claimant", "voted_claimant",
-                 "silence_claim", "switched_vote", "claimed_villager")
+TEAM_FEATURES = ("claimed_seer", "claimed_seer_day1", "counterclaimed", "first_accuser_day1", "accused_claimant",
+                 "voted_claimant", "scattershot", "silence_claim", "switched_vote", "abstained", "claimed_villager",
+                 "most_talkative", "quietest")
 
 
 def team_profiles(games: list[Game]) -> dict[str, dict]:

@@ -354,3 +354,19 @@ def test_claude_sees_which_team_sits_in_each_seat():
     prompt = client.requests[0]["messages"][0]["content"]
     assert 'Player0 = "Yuriko Red"' in prompt and 'Player6 = "alime588" (you)' in prompt
     assert 'Player2 = "alime588" (another copy of our agent' in prompt
+
+
+def test_claude_gets_a_live_read_of_each_players_style():
+    talk = [(4, "I am the Seer. I checked Player2: WOLF. Vote Player2."), (2, "I'm voting Player4, a fake seer."),
+            (3, "Player5 is suspicious, I'm voting Player5."), (3, "Actually I'm voting Player1.")]
+    votes = [{"day": 1, "votes": {"Player2": "Player4", "Player3": "Player2", "Player4": "Player2"}}]
+    dead = [{"player": "Player2", "role": "wolf", "cause": "vote", "day": 1}]
+    s = chat_state(day=2, messages=talk, votes=votes, dead=dead, alive=[0, 1, 3, 4, 5, 6])
+    client = FakeClient(_send("Hello."))
+    brain(client).choose_message(s, ctx(6))
+    prompt = client.requests[0]["messages"][0]["content"]
+    read = prompt[prompt.index("How each player has played"):prompt.index("Rule-engine analysis")]
+    assert "- Player4: 1 messages; claimed seer on day 2 (Player2 wolf)" in read
+    assert "- Player3: 2 messages; accused" in read and "Player1, Player5" in read
+    assert "1 vote(s)" in read and "with the lynch 1" in read
+    assert "Player2:" not in read  # the dead aren't read
