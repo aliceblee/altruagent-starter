@@ -277,3 +277,14 @@ def test_deep_model_can_be_turned_off(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setenv("CLAUDE_DEEP_MODEL", "")
     assert provider_from_env().deep_model is None
+
+
+def test_red_alert_drops_builds_already_in_production():
+    from examples.llm.redalert import drop_requeued_buildings
+
+    state = {"observation": {"production": [{"queue": "Building", "item": "proc", "progress": 0.4, "ready": False},
+                                            {"queue": "Infantry", "item": "e1", "progress": 0.2}]}}
+    orders = [{"cmd": "build", "item": "proc"}, {"cmd": "build", "item": "barr"}, {"cmd": "build", "item": "barr"},
+              {"cmd": "train", "item": "e1", "count": 3}]
+    kept, dropped = drop_requeued_buildings(orders, state)
+    assert kept == [{"cmd": "build", "item": "barr"}, {"cmd": "train", "item": "e1", "count": 3}] and dropped == 2

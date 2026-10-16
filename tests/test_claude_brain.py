@@ -469,3 +469,16 @@ def test_out_of_credit_stops_claude_for_the_game_at_once():
     for _ in range(3):
         assert b.choose_action(vote_state(), ctx(6)).action_id != "7"
     assert len(client.requests) == 1
+
+
+def test_day1_second_message_must_name_a_suspect_until_one_is_named():
+    client = FakeClient(
+        {"notes": "", "decision": "send", "recipient": "everyone", "message": "My read: Player5 echoed others."},
+        {"notes": "", "decision": "end", "recipient": "everyone", "message": ""},
+    )
+    b = brain(client)
+    b.choose_message(chat_state(day=1), ctx(6))  # the opener, sent without Claude
+    b.choose_message(chat_state(day=1, messages=[(3, "Hi all, any leads?")]), ctx(6))
+    assert "must name one player as your tentative suspect" in client.requests[0]["messages"][0]["content"]
+    b.choose_message(chat_state(day=1), ctx(6))
+    assert "tentative suspect" not in client.requests[1]["messages"][0]["content"]  # already named Player5

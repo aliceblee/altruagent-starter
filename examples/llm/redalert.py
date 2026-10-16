@@ -701,6 +701,25 @@ def over_queued(state: dict[str, Any]) -> list[dict[str, Any]]:
     return [{"item": i, "queued": n} for i, n in sorted(counts.items(), key=lambda kv: -kv[1]) if n >= OVERQUEUE_WARN_AT]
 
 
+def drop_requeued_buildings(orders: list[dict[str, Any]], state: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
+    """``orders`` without a ``build`` of a building or defense that is already in production
+    (queued, in progress or ready to place), or built twice in one batch. Test games: the
+    model queued two refineries and two barracks at once again and again, tying up all the
+    cash. A second refinery is still fine once the first has been placed."""
+    busy = {str(p.get("item") or "").lower() for p in _list(_dict(state.get("observation")), "production")
+            if str(p.get("queue")).lower() in ("building", "defense")}
+    kept, dropped = [], 0
+    for order in orders:
+        item = str(order.get("item") or "").lower()
+        if order.get("cmd") == "build" and item and item in busy:
+            dropped += 1
+            continue
+        if order.get("cmd") == "build" and item:
+            busy.add(item)
+        kept.append(order)
+    return kept, dropped
+
+
 # --- The player ---------------------------------------------------------------------
 
 
@@ -803,6 +822,9 @@ class RedAlertPlayer:
         # Orders refused BLOCK_AFTER times for a reason that still holds are not
         # sent (the next prompt marks them blocked); the rest go out.
         orders = self._drop_blocked(orders, raw)
+        orders, requeued = drop_requeued_buildings(orders, raw)
+        if requeued:
+            self._log(f"[llm] red_alert: dropped {requeued} build order(s) for buildings already in production")
         reasoning = trim_reasoning(answer.get("reasoning_summary"))
         self._last_reasoning = reasoning
         if not orders:

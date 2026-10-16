@@ -8,8 +8,10 @@ no code needed. Keep it short.
 - Destroying everything wins outright, but most matches hit the time limit.
   Then the tiebreak is **kills_cost - deaths_cost**, then **assets_value**: value
   you destroyed minus value you lost, then what you still own. So **don't throw
-  units away**: a lost attack is points for the opponent, and a big, intact
-  army and base count at the end.
+  units away** in hopeless attacks, but **never stop building an army**:
+  losing your base loses the game outright. In testing we "held a few riflemen
+  to protect the tiebreak" while the opponent massed tanks, and lost our base
+  twice in a row.
 
 ## Economy first (test games: we rushed infantry, the refinery came last, we ran out of money)
 
@@ -26,6 +28,15 @@ no code needed. Keep it short.
   before more units. (Test games won, but stalled at zero cash mid-game.)
 
 ## Army
+
+- **Production never stops.** From the moment the barracks and war factory
+  exist, keep both queues busy for the whole game (queue the next unit before
+  the queue runs empty). Spend most money on tanks from the war factory.
+- Aim for 8+ combat units by 3 minutes and keep growing. "Hold and defend"
+  means keep producing at home, never idle with a handful of units.
+- Build 1-2 defenses (pillbox / turret / tesla coil / flame tower, whatever
+  available_production offers) once the war factory is up, between your base
+  and the enemy, and more when under_attack events show a bigger enemy army.
 
 - After the economy is running, build steadily from barracks and war factory:
   tanks (1tnk/2tnk/3tnk, from available_production) are worth far more than

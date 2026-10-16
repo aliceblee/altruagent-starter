@@ -107,6 +107,11 @@ def _accuses(text: str, me: int) -> bool:
 # Our own vote announcements ("I'm voting Player3", "my vote stays on Player3"); the last one counts.
 _OUR_VOTE = re.compile(r"\b(?:I'?m|I am|I'll|I will)\s+(?:\w+\s+){0,2}?vot(?:ing|e)\s+(?:for\s+|on\s+)?player\s*(\d)\b"
                        r"|\bmy vote (?:is|stays|goes|remains)\s+(?:on\s+|with\s+)?player\s*(\d)\b", re.I)
+# One of our own public messages naming a suspect ("my read: Player5", "Player2 worries me",
+# "I lean toward Player3"): after that we're no longer the player who "hasn't named anyone".
+_NAMES_A_READ = re.compile(
+    r"\b(?:suspect\w*|lean\w*|read|concern\w*|worr\w*|suspicious|wolfy|sus)\b[^.?!]{0,40}\bplayer\s*\d"
+    r"|\bplayer\s*\d\b[^.?!]{0,40}\b(?:worries|concerns|suspicious|is my|looks|seems|feels|reads)\b", re.I)
 # Someone telling a player that what they said isn't true.
 _CORRECTION = re.compile(
     r"\b(?:inaccura\w*|incorrect|wrong|false\w*|fabricat\w*|untrue|not true|misrepresent\w*|"
@@ -186,6 +191,7 @@ class ClaudeWerewolfAgent:
         self._snap: Any = None
         self._rebutted: set[tuple[Any, int]] = set()  # (day, accuser) we've answered instantly
         self._follow_up: str = ""  # what Claude must back up on its next turn
+        self._read_named_day: Any = None  # day on which we publicly named a suspect
         self._rng = random.Random()
 
     # -- runtime hooks ----------------------------------------------------------------------
@@ -274,6 +280,15 @@ class ClaudeWerewolfAgent:
                       "Answer it: if someone raised a concern about you or asked your opinion, reply to them by "
                       "name and share your current read discreetly, in words, never numbers.")
         choice += self._seer_wolf_hint(snap) + self._partner_push_hint(snap)
+        if snap.day <= 1 and self._read_named_day != snap.day and self._sent_today >= 1 and not news:
+            # Test games: three times our second and third day-1 messages only asked the table for reads
+            # ("who's your top suspect?"), and LLM tables voted us out as "the only one who hasn't named
+            # a suspect" - twice even after the playbook said not to.
+            whom = "a player other than your partner" if snap.role == WOLF else "one player"
+            choice += (f" You haven't named a suspect yet today, and the opener already asked for leads. This "
+                       f"message must name {whom} as your tentative suspect, with a concrete reason from what "
+                       "they said or did, held lightly. Don't ask the table for reads or offer to back someone "
+                       "else's case instead: a player who only asks gets voted out as evasive.")
         if self._follow_up:
             choice += (f" You just answered an accusation in a quick line: \"{self._follow_up}\". Now back it up "
                        "firmly with specifics from the chat and votes, and keep the same stance and vote.")
@@ -476,6 +491,8 @@ class ClaudeWerewolfAgent:
             votes = [int(a or b) for a, b in _OUR_VOTE.findall(plain_quotes(decision.content))]
             if votes and not decision.recipients:
                 self._announced[self._chat_day] = votes[-1]
+            if not decision.recipients and (votes or _NAMES_A_READ.search(plain_quotes(decision.content))):
+                self._read_named_day = self._chat_day
             self._sent_today += 1
             self._owed, self._fresh = {}, 0
             self._claims_known = set(self.advisor.chat.seer_claims)
