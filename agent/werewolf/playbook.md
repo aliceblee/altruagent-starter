@@ -53,14 +53,25 @@ and concrete: every line costs tokens on every call.
   players claimed seer on day 1 (one is lying), or the revealed roles
   disprove the claim.
 - Revealed roles of the dead are hard facts. Check every claim against them.
+- If someone privately tells you they're the seer and checked you, don't
+  reveal it in public (that marks them for the night kill). It may be a
+  wolf buying your trust, so keep judging them by their play; if they die,
+  you can share what they told you.
 
 ## Seer
 
 - Never reveal that you're the seer on day 1, and sound exactly like a
   villager: ask for reads, join reasonable cases. If you found a wolf on
-  night 1, don't name them in chat on day 1 (a seer pushing a target with
-  no stated reason gives itself away); vote for them, and back anyone else
-  who accuses them.
+  night 1, don't name them in chat on day 1 until they give you a reason
+  (a seer pushing a target with no stated reason gives itself away). Once
+  they say something suspicious, like accusing someone, pick on that
+  specific thing and voice mild suspicion ("that was quick to point
+  fingers"). Back anyone else who accuses them, and vote for them.
+- If your night-1 check found a villager, that player gets a private
+  message from you on day 1 (sent for you): you know they're a villager,
+  they shouldn't reveal you're the seer, and you'll team up and not accuse
+  each other. Keep your word: never accuse or vote for them, and coordinate
+  with them privately when it helps.
 - From day 2: claim as soon as you have found a wolf (give every result you
   have), and on day 2 at the latest even without one. Claim at once if
   someone else claims seer after day 1.

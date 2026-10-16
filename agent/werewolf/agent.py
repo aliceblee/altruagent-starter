@@ -52,6 +52,17 @@ DAY1_OPENERS = (
     "Morning, everyone. No real info so far. Any leads?",
     "Hey all, nothing concrete yet. Who has a lead?",
 )
+# Our seer, day 1, privately to the player it checked on night 1 when they came up villager (sent
+# word for word): a hidden ally who knows we're the real seer.
+SEER_ALLY_LINE = ("I know you're a villager because I checked you as a seer last night. Don't reveal that I'm "
+                  "a seer but let's team up and not accuse each other.")
+# Our seer, day 1, about the wolf its night-1 check found ({wolf}), once that wolf has pushed someone
+# ({target}): mild suspicion hung on what they said, never how we know.
+SEER_POKES = (
+    "{wolf}, that was quick to point at {target} with nothing to go on. That bothers me a bit; I'm leaning {wolf}.",
+    "Not loving how fast {wolf} went after {target}. Day 1, no info, and already a target? I'm leaning {wolf} for now.",
+    "{wolf} pushing {target} this early feels off to me. I'd rather take a closer look at {wolf}.",
+)
 # Day 1 with nothing to go on: ask the table instead of naming anyone.
 DAY1_ASKS = (
     "No leads yet. Who's your top suspect, and why? I'll back the strongest case so we don't split.",
@@ -124,6 +135,7 @@ class WerewolfAgent:
         self._fake_seer = False
         self._fake_results: dict[int, str] = {}
         self._told_partner_day: int | None = None
+        self._told_ally = False  # seer: sent SEER_ALLY_LINE
         self._planned_kill: tuple[int, int] | None = None  # (day, seat) we told our partner
         self._fake_accused: set[int] = set()  # who we called a liar / wolf as fake seer
         self._claim_busted = False  # our fake seer claim was disproved by a revealed role
@@ -707,8 +719,10 @@ class WerewolfAgent:
         """A villager (or the hidden seer) on day 1 with nothing to go on: fight back against a
         vote on us, else join the leading announced vote, else ask the table for reads (once).
         We never name a random suspect: other agents ask for the reason, and a made-up one gets
-        us caught. A seer that found a wolf only fights back against, or joins a push on, that
-        wolf (it votes the wolf whatever it says). None when there's nothing new to say."""
+        us caught. A seer that found a wolf only ever names that wolf: it fights back if the wolf
+        pushes it, voices mild suspicion once the wolf pushes someone else (hung on what the wolf
+        said), or joins someone else's push on it; it votes the wolf whatever it says. None when
+        there's nothing new to say."""
         if snap.day > 1:
             return None
         # Announced votes, plus plain accusations ("I'm convinced Player0 is a wolf"): an
@@ -734,6 +748,13 @@ class WerewolfAgent:
                     "I think you're the werewolf.", {"intent": "vote", "vote": accuser})
         if self._announced_target is not None:
             return None
+        pushing = [w for w in known if intents.get(w) not in (None, w)]
+        if pushing and "seer_poke" not in self._said:
+            self._said.add("seer_poke")
+            wolf = pushing[0]
+            self._announced_target = wolf
+            line = self.rng.choice(SEER_POKES).format(wolf=_p(wolf), target=_p(intents[wolf]))
+            return line, {"intent": "lean"}  # mild on purpose: no "I'm voting" appended; we still vote the wolf
         backers: dict[int, list[int]] = {}
         for voter, t in intents.items():  # in the order they were announced
             if t != snap.me and t not in cleared and (allowed is None or t in allowed):
@@ -937,7 +958,19 @@ class WerewolfAgent:
 
     # -- wolf partner coordination -----------------------------------------------------------
 
+    def _seer_ally(self, snap: Snapshot) -> int | None:
+        """Day 1 as the seer: the living player our night-1 check found to be a villager, if any."""
+        if snap.role != SEER or snap.day > 1:
+            return None
+        cleared = [t for t, v in snap.seer_results.items() if v != WOLF and t in snap.alive and t != snap.me]
+        return cleared[0] if cleared else None
+
     def _private_message(self, snap: Snapshot) -> SendMessage | None:
+        ally = self._seer_ally(snap)
+        if ally is not None and not self._told_ally:
+            self._told_ally = True
+            self.log(f"[werewolf] P{snap.me} (seer) tells Player{ally} privately: {SEER_ALLY_LINE}")
+            return SendMessage(SEER_ALLY_LINE, [ally])
         if snap.role != WOLF or self._told_partner_day == snap.day:
             return None
         partners = sorted(snap.partners & snap.alive)

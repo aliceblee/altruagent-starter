@@ -852,9 +852,11 @@ SEER_FOUND_VILLAGER = "Your role: seer. Night 1: you investigated Player4: villa
 
 
 def _seer_day1_texts(observation, messages, calls=4):
+    """The seer's public day-1 messages (the private ally message is checked on its own)."""
     agent = WerewolfAgent(rng=random.Random(0), polish=lambda text, facts: "POLISHED " + text)
     s = state(2, observation, phase="messaging", messages=messages)
-    sent = [m for m in (agent.choose_message(s, ctx(2)) for _ in range(calls)) if isinstance(m, SendMessage)]
+    sent = [m for m in (agent.choose_message(s, ctx(2)) for _ in range(calls))
+            if isinstance(m, SendMessage) and not m.recipients]
     vote = agent.choose_action(state(2, observation, legal=[0, 1, 3, 4, 5, 6, 7]), ctx(2))
     return agent, [m.content for m in sent], vote.action_id
 
@@ -948,3 +950,39 @@ def test_accused_defense_includes_the_read():
               alive=[1, 2, 3, 4, 5, 6], messages=[(2, "Player6 is a wolf. I'm voting Player6.")])
     texts = [m.content for m in (agent.choose_message(s, ctx(6)) for _ in range(3)) if isinstance(m, SendMessage)]
     assert any("My read so far" in t for t in texts)
+
+
+def test_seer_privately_tells_its_night1_villager_and_never_votes_them():
+    from agent.werewolf.agent import SEER_ALLY_LINE
+
+    agent = WerewolfAgent(rng=random.Random(0))
+    s = state(2, SEER_FOUND_VILLAGER, phase="messaging")
+    sent = [m for m in (agent.choose_message(s, ctx(2)) for _ in range(4)) if isinstance(m, SendMessage)]
+    private = [m for m in sent if m.recipients]
+    assert [(m.content, m.recipients) for m in private] == [(SEER_ALLY_LINE, [4])]  # once, word for word
+    assert sent[1] is private[0]  # right after the opener
+    talk = state(2, SEER_FOUND_VILLAGER, phase="messaging", messages=[(1, "I'm voting Player4."), (3, "Voting Player4.")])
+    agent.choose_message(talk, ctx(2))
+    assert agent.choose_action(state(2, SEER_FOUND_VILLAGER, legal=[0, 1, 3, 4, 5, 6, 7]), ctx(2)).action_id != "4"
+
+
+def test_seer_with_a_night1_wolf_sends_no_ally_message():
+    agent = WerewolfAgent(rng=random.Random(0))
+    s = state(2, SEER_FOUND_WOLF, phase="messaging")
+    sent = [m for m in (agent.choose_message(s, ctx(2)) for _ in range(4)) if isinstance(m, SendMessage)]
+    assert not any(m.recipients for m in sent)
+
+
+def test_seer_mildly_accuses_its_night1_wolf_once_the_wolf_pushes_someone():
+    from agent.werewolf.agent import SEER_POKES
+
+    agent, texts, vote = _seer_day1_texts(SEER_FOUND_WOLF, [(4, "I'm voting Player1, they seem off.")])
+    pokes = [t for t in texts if "Player4" in t]
+    assert len(pokes) == 1 and "Player1" in pokes[0] and vote == "4"
+    assert any(pokes[0].endswith(p.format(wolf="Player4", target="Player1")) for p in SEER_POKES)
+    assert not any("seer" in t.lower() for t in texts[1:])
+
+
+def test_seer_stays_quiet_about_its_wolf_while_the_wolf_says_nothing_suspicious():
+    agent, texts, vote = _seer_day1_texts(SEER_FOUND_WOLF, [(4, "Hello everyone, any leads?")])
+    assert not any("Player4" in t for t in texts) and vote == "4"

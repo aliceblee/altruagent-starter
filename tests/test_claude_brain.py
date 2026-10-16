@@ -240,3 +240,79 @@ def test_owning_up_to_a_silence_claim_is_allowed():
     text = "Player1, fair: calling Player5 silent was my mistake. I'm voting Player1."
     client = FakeClient({"notes": "", "decision": "send", "recipient": "everyone", "message": text})
     assert brain(client).choose_message(chat_state(day=2, messages=[(1, "Hi.")]), ctx(6)).content == text
+
+
+def _send(text):
+    return {"notes": "", "decision": "send", "recipient": "everyone", "message": text}
+
+
+def test_after_its_messages_run_out_claude_stays_quiet_until_a_seer_claim_then_speaks_once_more():
+    # Mixed game 2026-10-15: we used 4 messages in 17 s, went silent, and then voted against our announced
+    # target after a seer claim we never answered.
+    client = FakeClient(*[_send(f"Message {n}. I'm voting Player5.") for n in range(3)],
+                        _send("Player4 claimed seer, so I'm moving my vote off Player5: I'm voting Player1."))
+    b = brain(client)
+    talk = [(1, "Hi.")]
+    b.choose_message(chat_state(day=1, messages=talk), ctx(6))  # the opener
+    for n in range(3):
+        talk = talk + [(2, f"Thoughts number {n}.")]
+        assert isinstance(b.choose_message(chat_state(day=1, messages=talk), ctx(6)), SendMessage)
+    talk = talk + [(3, "Anything else?")]
+    assert b.choose_message(chat_state(day=1, messages=talk), ctx(6)) is TERMINATE_MESSAGING  # out of messages
+    assert len(client.requests) == 3
+    talk = talk + [(4, "I am the Seer. I checked Player1: WOLF.")]
+    msg = b.choose_message(chat_state(day=1, messages=talk), ctx(6))
+    assert isinstance(msg, SendMessage) and "Player1" in msg.content
+    assert "Player4 claimed seer" in client.requests[-1]["messages"][0]["content"]
+    talk = talk + [(4, "Vote Player1!")]
+    assert b.choose_message(chat_state(day=1, messages=talk), ctx(6)) is TERMINATE_MESSAGING  # the server's 5 used
+    assert len(client.requests) == 4
+
+
+def test_after_ending_claude_speaks_again_only_when_accused():
+    client = FakeClient({"notes": "", "decision": "end", "recipient": "everyone", "message": ""},
+                        _send("Player2, I'm a villager; my vote stays on Player3."))
+    b = brain(client)
+    assert b.choose_message(chat_state(day=2), ctx(6)) is TERMINATE_MESSAGING
+    assert b.choose_message(chat_state(day=2, messages=[(1, "Hello.")]), ctx(6)) is TERMINATE_MESSAGING
+    assert len(client.requests) == 1  # nothing important: no Claude call
+    msg = b.choose_message(chat_state(day=2, messages=[(1, "Hello."), (2, "Player6 is a wolf, I'm voting Player6.")]),
+                           ctx(6))
+    assert isinstance(msg, SendMessage) and len(client.requests) == 2
+
+
+def test_the_vote_request_reminds_claude_of_its_announced_vote():
+    client = FakeClient(_send("I'm voting Player3."), {"notes": "", "action_id": "3"})
+    b = brain(client)
+    b.choose_message(chat_state(day=2), ctx(6))
+    b.choose_action(vote_state(day=2, messages=[(6, "I'm voting Player3.")]), ctx(6))
+    assert "you announced a vote for Player3" in client.requests[-1]["messages"][0]["content"]
+
+
+def test_claude_seer_sends_the_ally_message_word_for_word_and_wont_vote_its_ally():
+    from agent.werewolf.agent import SEER_ALLY_LINE
+
+    seer = "You are Player6. Your role: seer. Night 1: you investigated Player4: villager."
+    client = FakeClient({"notes": "", "action_id": "4"})
+    b = brain(client)
+    b.choose_message(chat_state(observation=seer, day=1), ctx(6))  # the opener
+    msg = b.choose_message(chat_state(observation=seer, day=1, messages=[(1, "Hi.")]), ctx(6))
+    assert (msg.content, msg.recipients) == (SEER_ALLY_LINE, [4]) and client.requests == []
+    vote = b.choose_action(state(6, seer, legal=[0, 1, 2, 3, 4, 5, 7]), ctx(6))
+    assert vote.action_id != "4"
+
+
+def test_claude_seer_may_pick_on_its_wolf_once_the_wolf_accuses_someone():
+    seer = "You are Player6. Your role: seer. Night 1: you investigated Player4: wolf."
+    poke = "Player4, that was quick to go after Player1 with nothing to go on. I'm leaning Player4."
+    client = FakeClient(_send(poke), _send(poke))
+    b = brain(client)
+    b.choose_message(chat_state(observation=seer, day=1), ctx(6))  # the opener
+    talk = [(4, "Hello, any leads?")]
+    msg = b.choose_message(chat_state(observation=seer, day=1, messages=talk), ctx(6))
+    assert not (isinstance(msg, SendMessage) and msg.content == poke)  # nothing suspicious yet
+    assert "Don't name Player4" in client.requests[0]["messages"][0]["content"]
+    talk = talk + [(4, "I'm voting Player1, they seem off.")]
+    msg = b.choose_message(chat_state(observation=seer, day=1, messages=talk), ctx(6))
+    prompt = client.requests[1]["messages"][0]["content"]
+    assert msg.content == poke and "now fair game" in prompt and "they seem off" in prompt
