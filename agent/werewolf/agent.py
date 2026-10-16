@@ -46,11 +46,13 @@ STICKY_MARGIN = 0.12
 # The opener is our first message of day 1. (The old "vegetarian vampire Eddie Cullen" joke got
 # us targeted at LLM tables.) None of them mentions the seer: asking the seer to speak up on
 # day 1 just points the wolves at it.
+# It asks for suspects and reasons, but never offers to "back the strongest case": at LLM tables a
+# player who only asks and defers gets voted out as evasive (three day-1 eliminations in testing).
 DAY1_OPENERS = (
-    "Hello! No hard info yet. Anyone have a lead?",
-    "Hi all. Nothing solid to go on yet. Does anyone have a lead?",
-    "Morning, everyone. No real info so far. Any leads?",
-    "Hey all, nothing concrete yet. Who has a lead?",
+    "Hello! No hard info yet. Who's your top suspect, and why?",
+    "Hi all. Nothing solid to go on yet. Who's your top suspect, and why?",
+    "Morning, everyone. No real info so far. Who's your top suspect, and why?",
+    "Hey all, nothing concrete yet. Who's your top suspect and why?",
 )
 # Our seer, day 1, privately to the player it checked on night 1 when they came up villager (sent
 # word for word): a hidden ally who knows we're the real seer.
@@ -63,11 +65,12 @@ SEER_POKES = (
     "Not loving how fast {wolf} went after {target}. Day 1, no info, and already a target? I'm leaning {wolf} for now.",
     "{wolf} pushing {target} this early feels off to me. I'd rather take a closer look at {wolf}.",
 )
-# Day 1 with nothing to go on: ask the table instead of naming anyone.
+# Day 1 with nothing to go on (rule engine only; the Claude brain names a tentative suspect instead):
+# ask the table instead of naming anyone, without offering to defer to someone else's case.
 DAY1_ASKS = (
-    "No leads yet. Who's your top suspect, and why? I'll back the strongest case so we don't split.",
-    "Still nothing solid. Name your top suspect and your reason; I'll go with the best-argued case so we don't split.",
-    "No real info yet. Who worries you most, and why? Let's settle on the strongest case together rather than scatter.",
+    "Still no leads on my side. Who's your top suspect, and why?",
+    "Still nothing solid. Name your top suspect and your reason.",
+    "No real info yet. Who worries you most, and why?",
 )
 # Following someone else's vote ({who} pushed {target}). Each says "join"/"back" so it reads as following.
 JOIN_LINES = (

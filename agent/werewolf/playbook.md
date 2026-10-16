@@ -6,8 +6,9 @@ and concrete: every line costs tokens on every call.
 
 ## Table talk
 
-- Day 1, your first message (a short hello asking for leads) is sent for
-  you, whatever your role. Don't repeat it. Never ask the seer to reveal
+- Day 1, your first message (a short hello asking everyone for their top
+  suspect and why) is sent for you, whatever your role. Don't repeat it, and
+  never offer to "back the strongest case": answer your own question. Never ask the seer to reveal
   themselves or share results on day 1: it points the wolves at them. No
   jokes or personas: at LLM tables, gimmicks get you targeted.
 - Talk the same way whatever your role, in your own words each game. Other

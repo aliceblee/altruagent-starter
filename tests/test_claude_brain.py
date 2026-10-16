@@ -482,3 +482,11 @@ def test_day1_second_message_must_name_a_suspect_until_one_is_named():
     assert "must name one player as your tentative suspect" in client.requests[0]["messages"][0]["content"]
     b.choose_message(chat_state(day=1), ctx(6))
     assert "tentative suspect" not in client.requests[1]["messages"][0]["content"]  # already named Player5
+
+
+def test_claude_is_not_shown_the_rule_engines_day1_ask():
+    from agent.werewolf.claude_brain import _rule_engine_hint
+    from agent.werewolf.agent import DAY1_ASKS
+
+    assert "name your own tentative suspect" in _rule_engine_hint(SendMessage(DAY1_ASKS[0]))
+    assert "Player3" in _rule_engine_hint(SendMessage("I'm voting Player3."))

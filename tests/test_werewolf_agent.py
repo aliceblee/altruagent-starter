@@ -637,7 +637,7 @@ def _villager_day1(messages, seed=0):
 
 def test_day1_nobody_voted_yet_asks_for_reads_without_naming_a_random_suspect():
     texts, vote = _villager_day1([])
-    assert texts == ["No leads yet. Who's your top suspect, and why? I'll back the strongest case so we don't split."]
+    assert texts == ["Still no leads on my side. Who's your top suspect, and why?"]
     assert vote not in ("6", "7")  # still never abstains
     facts = ChatFacts()
     read_message(facts, 6, texts[0], [], 1, 0, RESOLVER)
@@ -1012,3 +1012,10 @@ def test_real_votes_still_count():
     facts = ChatFacts()
     read_message(facts, 5, "I'm voting Player0.", [], 1, 6, RESOLVER)
     assert facts.intents_on(1) == {5: 0}
+
+
+def test_day1_lines_never_offer_to_back_someone_elses_case():
+    from agent.werewolf.agent import DAY1_ASKS, DAY1_OPENERS
+
+    assert all("top suspect" in t for t in DAY1_OPENERS)
+    assert not any(w in t.lower() for t in DAY1_OPENERS + DAY1_ASKS for w in ("back the", "best-argued", "i'll go with"))

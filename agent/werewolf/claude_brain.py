@@ -48,7 +48,7 @@ from typing import Any, Callable
 
 from altruagent import TERMINATE_MESSAGING, DecisionContext, GameState, SendMessage
 
-from .agent import DAY1_OPENERS, MAX_CHATS_PER_DAY, MAX_WORDS, SEER_ALLY_LINE, WerewolfAgent
+from .agent import DAY1_ASKS, DAY1_OPENERS, MAX_CHATS_PER_DAY, MAX_WORDS, SEER_ALLY_LINE, WerewolfAgent
 from .parsing import SEER, UNISON_GAP, WOLF, _SEER_CLAIM, plain_quotes, seat_teams, snapshot
 
 DEFAULT_MODEL = "claude-opus-5-5"
@@ -303,7 +303,7 @@ class ClaudeWerewolfAgent:
             f"It's the day discussion. {choice} recipient is 'everyone', or one player for a private "
             f"message only they see. At most {MAX_WORDS} words. You have sent {self._sent_today} of your "
             f"{SERVER_MAX_CHATS if news else MAX_CHATS_PER_DAY} messages today.\n"
-            f"The rule engine would: {_describe_message(advice)}"
+            f"The rule engine would: {_rule_engine_hint(advice)}"
         )
         schema = _schema({
             "notes": {"type": "string"},
@@ -709,6 +709,14 @@ def _read_learned() -> str:
 def _cause(exc: BaseException) -> str:
     inner = exc.__cause__ or exc.__context__
     return f" (cause: {type(inner).__name__}: {str(inner)[:200]})" if inner is not None else ""
+
+
+def _rule_engine_hint(advice: Any) -> str:
+    """The rule engine's suggestion for the prompt. Its day-1 "who's your suspect?" asks are left out:
+    Claude copied them word for word and was voted out as the player who never names anyone."""
+    if isinstance(advice, SendMessage) and advice.content in DAY1_ASKS:
+        return "nothing useful here (it has no read yet; name your own tentative suspect)"
+    return _describe_message(advice)
 
 
 def _describe_message(decision: Any) -> str:
