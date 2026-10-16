@@ -992,3 +992,12 @@ def test_red_alert_system_prompt_carries_the_playbook():
 
     text = build_system_prompt(None)
     assert "STRATEGY PLAYBOOK" in text and "refinery (proc) right away" in text
+
+
+def test_openai_errors_name_the_error_code_but_not_the_message():
+    def handler(request):
+        return httpx.Response(429, json={"error": {"code": "insufficient_quota", "message": f"key {FAKE_KEY} is out"}})
+
+    with pytest.raises(ProviderError) as exc_info:
+        _openai(handler).complete_structured([], "x", {})
+    assert "insufficient_quota" in str(exc_info.value) and FAKE_KEY not in str(exc_info.value)

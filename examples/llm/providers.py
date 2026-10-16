@@ -105,7 +105,14 @@ class OpenAIProvider:
         except httpx.HTTPError as exc:
             raise ProviderError(f"OpenAI request failed ({type(exc).__name__})") from None
         if response.status_code != 200:
-            raise ProviderError(f"OpenAI request failed (HTTP {response.status_code})")
+            # Only the error *code* ("insufficient_quota" = out of credit, "rate_limit_exceeded" = too
+            # many requests at once), never the message, which can echo parts of the key.
+            try:
+                code = response.json().get("error", {}).get("code")
+            except (ValueError, AttributeError):
+                code = None
+            code = code if isinstance(code, str) and re.fullmatch(r"[a-z_]{1,40}", code) else None
+            raise ProviderError(f"OpenAI request failed (HTTP {response.status_code}{f', {code}' if code else ''})")
         try:
             message = response.json()["choices"][0]["message"]
         except (ValueError, KeyError, IndexError, TypeError):
