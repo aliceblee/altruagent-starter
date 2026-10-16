@@ -45,7 +45,10 @@ def main() -> int:
             inner = inner.__cause__ or inner.__context__
             print(f"  caused by {type(inner).__name__}: {inner}")
         text = repr(inner)
-        if "CERTIFICATE_VERIFY_FAILED" in text or "certificate" in text.lower():
+        if "takes no keyword arguments" in text:
+            print("\nAn outdated 'brotli' package (Anaconda ships 1.1) can't unpack Claude's replies.\n"
+                  "Fix: pip install --upgrade \"brotli>=1.2\"   (or run `pip install -e .` again)")
+        elif "CERTIFICATE_VERIFY_FAILED" in text or "certificate" in text.lower():
             print("\nLooks like a certificate problem. Try: pip install --upgrade truststore certifi,\n"
                   "and on macOS run 'Install Certificates.command' from your Python folder in Applications.\n"
                   "On a school/work network that inspects HTTPS, try another network (e.g. a phone hotspot).")
