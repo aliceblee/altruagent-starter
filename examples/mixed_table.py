@@ -67,7 +67,7 @@ UNLISTED_SEAT = "random"  # any seat missing from SEATS
 # Two-player games: seat 0 / seat 1. Only "ours*" and the LLM brains play these;
 # the Werewolf dummies (random, silent, accuser, ...) don't.
 SEATS_BY_GAME: dict[str, dict[int, str]] = {
-    "pokemon_vgc_doubles_draft": {0: "ours", 1: "claude_sonnet"},
+    "pokemon_vgc_doubles_draft": {0: "ours", 1: "openai_61"},
     "red_alert": {0: "ours", 1: "openai_61"},
 }
 UNLISTED_SEAT_OTHER_GAMES = "openai_61"
