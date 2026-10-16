@@ -334,3 +334,11 @@ def test_learned_patterns_follow_the_playbook_in_the_instructions(monkeypatch):
     assert b.system.index("PLAYBOOK TEXT") < b.system.index("- A pattern.")
     monkeypatch.setenv("WEREWOLF_LEARNED", "0")
     assert "Learned from" not in ClaudeWerewolfAgent(FakeClient(), advisor=WerewolfAgent(), playbook="P").system
+
+
+def test_claude_wolf_is_warned_when_its_partner_just_pushed_a_target():
+    wolf = "You are Player6. Your role: wolf. Your fellow wolves: Player1."
+    client = FakeClient(_send("Hmm, let's hear more first."))
+    b = brain(client)
+    b.choose_message(chat_state(observation=wolf, day=2, messages=[(1, "I'm voting Player3, they dodged.")]), ctx(6))
+    assert "Your partner Player1 just pushed Player3" in client.requests[0]["messages"][0]["content"]

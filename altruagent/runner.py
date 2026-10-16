@@ -119,7 +119,7 @@ from typing import Any, Callable, NamedTuple, Protocol, Union
 from .errors import AltruAgentError, is_transient_error
 from .mcp_game import MCPGameSession
 from .mcp_transport import MCPToolError
-from .models import DecisionContext, GameState, LegalAction, Match
+from .models import DecisionContext, GameState, LegalAction, Match, Message
 
 # The sleep between reads against a server without wait_for_update.
 DEFAULT_WAIT_SECONDS = 5.0
@@ -721,6 +721,40 @@ def _resign_left_game_running(result: Any) -> bool:
     return isinstance(result, dict) and result.get("is_terminal") is False
 
 
+def _catch_up_messages(game: Any, state: GameState, seen_seq: int | None) -> None:
+    """Add to ``state.new_messages`` what was said after this agent's last read but before the
+    phase flipped: ``new_messages`` restarts at each flip, so in Werewolf the chat that ends a
+    discussion never reached the vote (or, for the last day, the end of the game). Fetched with
+    ``get_messages(since=...)``; only messages this seat may see are added. Best effort: any
+    failure leaves the state as it was."""
+    if seen_seq is None:
+        return
+    try:
+        answer = game.get_messages(since=seen_seq)
+        items = answer if isinstance(answer, list) else next(
+            (answer[k] for k in ("messages", "new_messages", "items") if isinstance(answer.get(k), list)), [])
+        me = state.raw.get("your_position")
+        have = {m.index for m in state.new_messages}
+        extra = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            message = Message.from_dict(item)
+            visible = not message.recipients or me is None or me in message.recipients or message.sender == me
+            if message.index > seen_seq and message.index not in have and visible:
+                extra.append(message)
+                have.add(message.index)
+        if extra:
+            state.new_messages = sorted(list(state.new_messages) + extra, key=lambda m: m.index)
+    except Exception:  # noqa: BLE001 - a nicety; never cost the game
+        return
+
+
+def _max_seq(state: GameState, seen_seq: int | None) -> int | None:
+    seqs = [m.index for m in state.new_messages] + ([seen_seq] if seen_seq is not None else [])
+    return max(seqs) if seqs else None
+
+
 def _terminal_game_state(last_state: GameState, result: dict) -> GameState:
     """Merge a ``get_result()``/``resign()`` result (authoritative for
     ``returns``/``termination_reason``, confirmed absent from ``get_state()``/
@@ -857,17 +891,22 @@ def run_game(
         return read(game.get_state)
 
     state = read(game.get_state)
+    seen_seq: int | None = None  # highest message seq shown to the agent so far
 
     while True:
         if state.is_terminal:
             result = read(game.get_result)
-            return _terminal_game_state(state, result)
+            final = _terminal_game_state(state, result)
+            final.new_messages = []
+            _catch_up_messages(game, final, seen_seq)  # the last day's closing chat, for on_game_end
+            return final
 
         if state.raw.get("eliminated"):
             state = wait(state, _last_message_seq(state))
             continue
 
         if state.phase == _MESSAGING_PHASE:
+            seen_seq = _max_seq(state, seen_seq)
             decision = _validate_message_decision(
                 _invoke_message_decision(message_decision_fn, state, context)
             )
@@ -933,6 +972,8 @@ def run_game(
                 ]
                 state.state_version = int(legal.get("state_version", state.state_version))
 
+            _catch_up_messages(game, state, seen_seq)
+            seen_seq = _max_seq(state, seen_seq)
             decision = _validate_decision(
                 _invoke_decision(decision_fn, state, context), state.legal_actions
             )

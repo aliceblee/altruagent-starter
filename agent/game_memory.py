@@ -78,6 +78,12 @@ class GameMemory:
             return
         self._written = True
         try:
+            last_day = self._chat[-1]["day"] if self._chat else None
+            for m in getattr(final_state, "new_messages", None) or []:  # the closing chat (runner catch-up)
+                if m.index not in self._seen and m.type == "chat":
+                    self._seen.add(m.index)
+                    self._chat.append({"day": last_day, "seq": m.index, "from": m.sender,
+                                       "to": list(m.recipients), "text": m.content})
             raw = getattr(final_state, "raw", None)
             record = {
                 "v": VERSION,

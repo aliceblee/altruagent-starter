@@ -85,6 +85,9 @@ and concrete: every line costs tokens on every call.
 - Coordinate privately with your partner once a day (a message with a
   single recipient is private): agree on a vote target and a different kill
   target (if today's vote works, that player is already gone by night).
+- Never push the same target right after your partner did: back-to-back
+  pushes on one player are the "unison" tell. Agree later, after a
+  villager has, or build on a villager's reasoning.
 - Vote with the village's plausible choice rather than against the table;
   look like a helpful villager, and on day 1 say only what a villager with
   no information would say.

@@ -48,7 +48,7 @@ from typing import Any, Callable
 from altruagent import TERMINATE_MESSAGING, DecisionContext, GameState, SendMessage
 
 from .agent import DAY1_OPENERS, MAX_CHATS_PER_DAY, MAX_WORDS, SEER_ALLY_LINE, WerewolfAgent
-from .parsing import SEER, WOLF, _SEER_CLAIM, plain_quotes, snapshot
+from .parsing import SEER, UNISON_GAP, WOLF, _SEER_CLAIM, plain_quotes, snapshot
 
 DEFAULT_MODEL = "claude-opus-5-5"
 MAX_TOKENS = 8000
@@ -232,7 +232,7 @@ class ClaudeWerewolfAgent:
             choice = (f"Send one message (decision 'send'); you can't end the discussion yet because {why}. "
                       "Answer it: if someone raised a concern about you or asked your opinion, reply to them by "
                       "name and share your current read discreetly, in words, never numbers.")
-        choice += self._seer_wolf_hint(snap)
+        choice += self._seer_wolf_hint(snap) + self._partner_push_hint(snap)
         if news:
             choice += (f" You had finished talking for today, but since your last message: {news}. Say how this "
                        "changes your read and your vote (if you change your vote, say why).")
@@ -312,6 +312,22 @@ class ClaudeWerewolfAgent:
         accusers = {spk for spk, _ in today}
         return [t for t, v in sorted(snap.seer_results.items())
                 if v == WOLF and t in snap.alive and t not in accused and t not in accusers]
+
+    def _partner_push_hint(self, snap: Any) -> str:
+        """Wolf: our partner just pushed a target. Echoing it at once is the "two in unison" tell that
+        villagers (and note-taking agents) look for; in our self-play logs our wolves did it 2.8x as
+        often as our villagers."""
+        if snap.role != WOLF:
+            return ""
+        chat = self.advisor.chat
+        recent = [(s, t) for s, t, d, n in chat.pushes
+                  if s in snap.partners and d == snap.day and chat.public_messages - n <= UNISON_GAP + 1]
+        if not recent:
+            return ""
+        partner, target = recent[-1]
+        return (f" Your partner Player{partner} just pushed Player{target}. Don't echo that right away: two players "
+                "pushing the same target back to back is a classic wolf tell. If you agree, let a villager back it "
+                "first, or build on a villager's reasoning instead.")
 
     def _seer_wolf_hint(self, snap: Any) -> str:
         """Day 1 as the seer with a found wolf: what Claude may say about them right now."""

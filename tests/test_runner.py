@@ -1749,3 +1749,63 @@ def test_a_message_that_cant_be_sent_as_json_fails_at_once_as_the_agents_error()
 
     assert exc_info.value.__cause__ is unsendable and "can't be sent" in str(exc_info.value)
     assert len(game.send_message_calls) == 1 and clock.sleeps == [] and lines == []
+
+
+def _chat(seq, sender, text, recipients=()):
+    return {"seq": seq, "sender": sender, "recipients": list(recipients), "content": text, "type": "chat"}
+
+
+class _ChatThenVote:
+    def __init__(self):
+        self.seen = []
+
+    def choose_message(self, state, context):
+        return TERMINATE_MESSAGING
+
+    def choose_action(self, state, context):
+        self.seen.append([m.content for m in state.new_messages])
+        return state.legal_actions[0]
+
+
+def test_messages_said_after_our_last_read_reach_the_vote():
+    # Werewolf: new_messages restarts when the phase flips, so the end of a discussion used to
+    # vanish before the vote. The runner now fetches it with get_messages(since=...).
+    class Game(FakeMCPGameSession):
+        def __init__(self):
+            super().__init__()
+            self.since = []
+
+        def get_messages(self, *, since=-1):
+            self.since.append(since)
+            closing = [_chat(0, 1, "old"), _chat(1, 2, "I'm the seer!"), _chat(2, 3, "psst", [4])]
+            return {"messages": [m for m in closing if m["seq"] > since]}
+
+    game = (
+        Game()
+        .queue_state(messaging_state(your_position=0, new_messages=[_chat(0, 1, "old")]),
+                     make_mcp_state(your_position=0), terminal_state(your_position=0))
+        .queue_send_message({"phase": "moving"})
+        .queue_legal_actions(int_actions(0, 1))
+        .queue_play_action(play_action_result())
+        .queue_result(result_dict())
+    )
+    agent = _ChatThenVote()
+    final = run_game(game, CONTEXT, agent, sleep=no_sleep)
+    assert agent.seen == [["I'm the seer!"]]  # a private message between two others is never shown
+    assert game.since[0] == 0 and [m.content for m in final.new_messages] == []  # nothing new at the end
+
+
+def test_a_failing_catch_up_never_costs_the_game():
+    class Game(FakeMCPGameSession):
+        def get_messages(self, *, since=-1):
+            raise RuntimeError("boom")
+
+    game = (
+        Game()
+        .queue_state(messaging_state(new_messages=[_chat(0, 1, "hi")]), make_mcp_state(), terminal_state())
+        .queue_send_message({"phase": "moving"})
+        .queue_legal_actions(int_actions(0, 1))
+        .queue_play_action(play_action_result())
+        .queue_result(result_dict())
+    )
+    assert run_game(game, CONTEXT, _ChatThenVote(), sleep=no_sleep).is_terminal
