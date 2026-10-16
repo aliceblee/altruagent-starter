@@ -36,6 +36,10 @@ English; change the strategy here, no code needed. Keep it short.
   Farigiraf / Cresselia in the back and set speed control only after both
   leads had fainted.
 - Keep a Pokémon in the back that handles their scariest threat.
+- **Always bring your speed control** (Tailwind / Trick Room / Icy Wind user):
+  in testing we drafted Cresselia twice and left it home both times.
+- If they have Amoonguss (Spore, Rage Powder), bring a Grass type or a
+  Safety Goggles / Overcoat user: a sleeping Pokémon loses the game for you.
 
 ## Battle turns
 
@@ -53,7 +57,9 @@ English; change the strategy here, no code needed. Keep it short.
   Don't Protect twice in a row (it likely fails).
 - Spread moves (Earthquake, Rock Slide, Heat Wave, Dazzling Gleam) are strong
   when they hit two targets; don't Earthquake your own partner unless it's
-  immune (Flying, Levitate).
+  immune (Flying, Levitate). A Choice-locked Earthquake user (Choice Scarf
+  Landorus) must sit next to a Flying / Levitate partner; in testing ours was
+  next to Arcanine, which had to Protect every turn.
 - Switch out a Pokémon that is about to be knocked out for nothing, or to
   reset Intimidate / Fake Out; otherwise keep attacking.
 - Count speed: under your Tailwind you usually move first; under their Trick
