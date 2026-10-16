@@ -22,6 +22,8 @@ no code needed. Keep it short.
   place finished buildings at once (place without `at`).
 - Keep harvesters harvesting; if one is idle or under attack, send it back to
   the ore and defend it.
+- Money at zero means too few harvesters: build a harvester (or a refinery)
+  before more units. (Test games won, but stalled at zero cash mid-game.)
 
 ## Army
 

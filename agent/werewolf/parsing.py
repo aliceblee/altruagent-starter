@@ -364,6 +364,14 @@ _VOTE_BEFORE = re.compile(
 )
 _RESULT_BEFORE = re.compile(r"(?:check(?:ed)?|investigat\w*|inspect\w*|look(?:ed)?\s+at|saw|peek\w*)\s*(?:on)?\s*$", re.I)
 _NEGATION = re.compile(r"\b(?:not|n't|never|no)\b", re.I)
+# "avoid a random vote on Player0", "why mention avoiding a vote on Player0", "rather than voting
+# Player0": talking about a vote, not casting one (a live game misread both as votes on us and
+# our agent fired back denials at two players who had defended it).
+_VOTE_DISCUSSED = re.compile(
+    r"\b(?:avoid\w*|against|instead\s+of|rather\s+than|without|hold(?:ing)?\s+off|refrain\w*|oppos\w*|"
+    r"mention\w*|propos\w*|suggest\w*\s+not|careful|random)\b", re.I)
+# A question about someone's vote ("why vote Player0?", "who proposed voting Player0?") isn't one.
+_ASKING = re.compile(r"^\W*(?:why|what|how|who|when|did|does|do|is|are|was|were)\b[^.!]*\?", re.I)
 # "Player0 has identified them as a wolf", "Player6 claims...": the name is the subject
 # reporting something, not the one being called a wolf.
 _REPORTING_AFTER = re.compile(
@@ -529,7 +537,8 @@ def read_message(facts: ChatFacts, sender: int, text: str, recipients: list[int]
             if is_claimant and (wolfish or clearish) and (_RESULT_BEFORE.search(before) or _RESULT_AFTER.search(after)):
                 verdict = WOLF if wolfish and not clearish else VILLAGER
                 facts.claimed_results.setdefault(sender, {})[seat] = verdict
-            if vote_target and not _NEGATION.search(before[-15:]):
+            if vote_target and not _NEGATION.search(before[-15:]) and not _VOTE_DISCUSSED.search(before[-35:]) \
+                    and not _ASKING.match(sentence):
                 facts.vote_intents.setdefault(day, {})[sender] = seat
                 facts.accusations.append((sender, seat, day))
                 if not recipients:
