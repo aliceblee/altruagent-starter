@@ -101,3 +101,58 @@ def test_router_plays_other_games_on_claude(monkeypatch, game):
     context = DecisionContext(session_id="s", tournament_id=None, game_type=game, agent_id="a", seat_position=0)
     player = Agent()._player(context)
     assert isinstance(player, LLMAgent) and isinstance(player._provider, ClaudeProvider)
+
+
+def test_router_logs_our_moves_and_outcome_in_other_games(tmp_path, monkeypatch):
+    from altruagent.models import GameState
+    from agent.decision_log import DecisionLog
+
+    class Delegate:
+        def choose_action(self, state, context):
+            return {"type": "doubles_turn"}
+
+    monkeypatch.setenv("ALTRUAGENT_DECISION_LOG_DIR", str(tmp_path))
+    agent = Agent(delegate=Delegate(), decision_log=DecisionLog())
+    context = DecisionContext(session_id="pk", tournament_id=None, game_type="pokemon_vgc_doubles_draft",
+                              agent_id="a", seat_position=0)
+    state = GameState.from_mcp_state({"session_id": "pk", "game_type": "pokemon_vgc_doubles_draft", "phase": "moving",
+                                      "your_position": 0, "players": []})
+    assert agent.choose_action(state, context) == {"type": "doubles_turn"}
+    agent.on_game_end(None, context, "won")
+    lines = [json.loads(line) for line in (tmp_path / "pk" / "seat0.jsonl").read_text().splitlines()]
+    assert [line["kind"] for line in lines] == ["action", "game_end"]
+    assert "doubles_turn" in lines[0]["decision"] and lines[1]["outcome"] == "won"
+
+
+@pytest.mark.parametrize("model, thinking", [
+    ("claude-sonnet-5-5", {"type": "between_tools"}),
+    ("claude-haiku-5-5", {"type": "disabled"}),
+    ("claude-opus-5-5", None),  # can't be turned off: effort controls it
+])
+def test_thinking_is_off_by_default_and_server_fallbacks_are_skipped(model, thinking):
+    client = FakeClient({"action_id": "a", "n": 0}, fallbacks_ok=False)  # a beta call would raise
+    ClaudeProvider(client, model).complete_structured(MESSAGES, "x", SCHEMA)
+    assert client.requests[0].get("thinking") == thinking
+
+
+def test_thinking_on_keeps_adaptive_thinking():
+    client = FakeClient({"action_id": "a", "n": 0})
+    ClaudeProvider(client, "claude-sonnet-5-5", thinking="on").complete_structured(MESSAGES, "x", SCHEMA)
+    assert "thinking" not in client.requests[0]
+
+
+def test_type_lists_become_any_of():
+    client = FakeClient({"t": None})
+    schema = {"type": "object", "properties": {"t": {"type": ["integer", "null"]}}, "required": ["t"],
+              "additionalProperties": False}
+    ClaudeProvider(client).complete_structured(MESSAGES, "x", schema)
+    sent = client.requests[0]["output_config"]["format"]["schema"]["properties"]["t"]
+    assert sent == {"anyOf": [{"type": "integer"}, {"type": "null"}]}
+
+
+def test_bad_request_errors_say_why():
+    err = Exception("bad")
+    err.status_code = 400
+    err.message = "thinking.type.between_tools is not supported for this model"
+    with pytest.raises(ProviderError, match="not supported for this model"):
+        ClaudeProvider(FakeClient(err)).complete_structured(MESSAGES, "x", SCHEMA)

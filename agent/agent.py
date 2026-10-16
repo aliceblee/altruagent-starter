@@ -50,7 +50,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from altruagent import TERMINATE_MESSAGING, DecisionContext, GameState, LegalAction, SendMessage, WithReasoning
+from altruagent import TERMINATE_MESSAGING, WAIT, DecisionContext, GameState, LegalAction, SendMessage, WithReasoning
 from agent.decision_log import DecisionLog
 from agent.game_memory import GameMemory
 
@@ -86,6 +86,7 @@ class Agent:
                 from examples.llm_agent import create_agent as create_llm_agent
 
                 self._delegate = create_llm_agent()
+                self._delegate._log = self._llm_note  # its [llm] lines (incl. FALLBACK) go to the decision log too
             else:
                 self._delegate = _FirstLegal()
         return self._delegate
@@ -93,7 +94,16 @@ class Agent:
     def choose_action(self, state: GameState, context: DecisionContext):
         player = self._player(context)
         if not _is_werewolf(context):
-            return player.choose_action(state, context)
+            self._context = context
+            started = time.monotonic()
+            decision = player.choose_action(state, context)
+            if decision is not WAIT:
+                self._decisions.write(
+                    context, "action", game_type=context.game_type, phase=state.phase, ms=_ms(started),
+                    decision=repr(getattr(decision, "action", decision))[:600],
+                    reasoning=getattr(decision, "reasoning_summary", None),
+                )
+            return decision
         self._context = context
         self._memory.observe(state, context)
         started = time.monotonic()
@@ -160,7 +170,9 @@ class Agent:
             method(result, context)
 
     def on_game_end(self, final_state: Any, context: DecisionContext, outcome: str | None) -> None:
-        """Werewolf: save this seat's record of the game for cross-game memory (agent/game_memory.py)."""
+        """Werewolf: save this seat's record of the game for cross-game memory (agent/game_memory.py).
+        Every game: note the outcome in the decision log."""
+        self._decisions.write(context, "game_end", game_type=context.game_type, outcome=outcome)
         if _is_werewolf(context):
             brain = "claude" if type(self._delegate).__name__ == "ClaudeWerewolfAgent" else "rules"
             self._memory.finish(final_state, context, outcome, agent=f"ours:{brain}")
@@ -168,6 +180,12 @@ class Agent:
                 from agent.werewolf.learn import refresh
 
                 refresh()  # learned.md picks up this game for the next one (never raises)
+
+    def _llm_note(self, message: str) -> None:
+        """The generic LLM agent's log lines (Pokémon, Red Alert): printed as before, and kept."""
+        print(message, flush=True)
+        if self._context is not None:
+            self._decisions.write(self._context, "note", text=message)
 
     def _note(self, message: str) -> None:
         """WerewolfAgent's own log lines: printed with WEREWOLF_DEBUG=1, always kept in the decision log."""

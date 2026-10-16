@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any, Protocol
 
 import httpx
@@ -21,6 +22,9 @@ DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
 # want a fast model; Werewolf has its own Claude brain (agent/werewolf/claude_brain.py).
 DEFAULT_CLAUDE_MODEL = "claude-sonnet-5-5"
 DEFAULT_CLAUDE_EFFORT = "low"
+# Thinking off by default: with it on, Sonnet 5.5 took 11-14 s per Pokémon draft pick in
+# testing, past our 10 s budget (the server allows 15), so most picks fell back.
+DEFAULT_CLAUDE_THINKING = "off"
 CLAUDE_MAX_TOKENS = 16000
 CLAUDE_FALLBACK_BETA = "server-side-fallback-2026-07-01"
 # Keywords Claude's structured outputs don't accept; the adapters' own validation
@@ -130,6 +134,7 @@ class ClaudeProvider:
         model: str = DEFAULT_CLAUDE_MODEL,
         *,
         effort: str = DEFAULT_CLAUDE_EFFORT,
+        thinking: str = DEFAULT_CLAUDE_THINKING,
         timeout: float = REQUEST_TIMEOUT_SECONDS,
     ) -> None:
         if client is None:
@@ -139,10 +144,13 @@ class ClaudeProvider:
         self._client = client
         self.model = model
         self.effort = effort
-        self._use_fallbacks = model.startswith(("claude-opus-5", "claude-sonnet-5"))
+        self._thinking = _thinking_off(model) if thinking == "off" else None
+        # Server-side fallbacks re-run the same request on another model, which would reject a
+        # model-specific "thinking off" setting; Pokémon and Red Alert rarely trigger refusals.
+        self._use_fallbacks = self._thinking is None and model.startswith(("claude-opus-5", "claude-sonnet-5"))
 
     def __repr__(self) -> str:
-        return f"ClaudeProvider(model={self.model!r}, effort={self.effort!r})"
+        return f"ClaudeProvider(model={self.model!r}, effort={self.effort!r}, thinking={'off' if self._thinking else 'on'})"
 
     def complete_structured(
         self, messages: list[dict], schema_name: str, schema: dict, *, timeout: float | None = None
@@ -157,6 +165,8 @@ class ClaudeProvider:
             "output_config": {"effort": self.effort,
                               "format": {"type": "json_schema", "schema": _claude_schema(schema)}},
         }
+        if self._thinking is not None:
+            request["thinking"] = self._thinking
         if system:
             request["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
         if timeout is not None:
@@ -165,8 +175,12 @@ class ClaudeProvider:
             response = self._create(request)
         except Exception as exc:  # noqa: BLE001 - any SDK/network error becomes a ProviderError
             status = getattr(exc, "status_code", None)
+            detail = ""
+            if isinstance(status, int) and 400 <= status < 500 and status not in (401, 403):
+                # The API's own message ("thinking.type ... is not supported") says what to fix.
+                detail = ": " + re.sub(r"sk-ant-\S+", "[key]", str(getattr(exc, "message", "") or ""))[:300]
             raise ProviderError(f"Claude request failed ({type(exc).__name__}"
-                                f"{f', HTTP {status}' if status else ''})") from None
+                                f"{f', HTTP {status}' if status else ''}){detail}") from None
         if response.stop_reason == "refusal":
             raise ProviderError("the model refused to answer")
         if response.stop_reason == "max_tokens":
@@ -191,13 +205,26 @@ class ClaudeProvider:
         return self._client.messages.create(**request)
 
 
+def _thinking_off(model: str) -> dict | None:
+    """The request's "no extended thinking" setting for ``model``, or None where thinking
+    can't be turned off (Claude Opus 5.5: lower ``effort`` instead)."""
+    if model.startswith("claude-sonnet-5-5"):
+        return {"type": "between_tools"}
+    if model.startswith("claude-haiku-5"):
+        return {"type": "disabled"}
+    return None
+
+
 def _claude_schema(schema: Any) -> Any:
     """``schema`` without the keywords Claude's structured outputs reject (and
-    ``minItems`` above 1)."""
+    ``minItems`` above 1), with ``"type": [a, b]`` written as ``anyOf``."""
     if isinstance(schema, list):
         return [_claude_schema(item) for item in schema]
     if not isinstance(schema, dict):
         return schema
+    if isinstance(schema.get("type"), list):
+        rest = {k: v for k, v in schema.items() if k != "type"}
+        return _claude_schema({"anyOf": [{**rest, "type": t} if t != "null" else {"type": "null"} for t in schema["type"]]})
     out = {}
     for key, value in schema.items():
         if key in _UNSUPPORTED_SCHEMA_KEYS or (key == "minItems" and isinstance(value, int) and value > 1):
@@ -215,6 +242,7 @@ def provider_from_env() -> LLMProvider:
         return ClaudeProvider(
             model=os.environ.get("CLAUDE_MODEL") or DEFAULT_CLAUDE_MODEL,
             effort=os.environ.get("CLAUDE_EFFORT") or DEFAULT_CLAUDE_EFFORT,
+            thinking=(os.environ.get("CLAUDE_THINKING") or DEFAULT_CLAUDE_THINKING).lower(),
         )
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
