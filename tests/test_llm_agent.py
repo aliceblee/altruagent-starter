@@ -735,7 +735,7 @@ def test_create_agent_without_key_fails_clearly(monkeypatch):
     monkeypatch.setattr(llm_agent, "load_dotenv", lambda: None)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
-    with pytest.raises(RuntimeError, match="OPENAI_API_KEY is not set"):
+    with pytest.raises(RuntimeError, match="Neither ANTHROPIC_API_KEY nor OPENAI_API_KEY is set"):
         create_agent()
 
 

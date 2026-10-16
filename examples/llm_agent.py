@@ -52,9 +52,12 @@ request may run past ``POKEMON_REQUEST_SECONDS``. Out of time, the agent
 plays its fallback rather than let the clock run out. Werewolf and Red Alert
 are unchanged.
 
-Configuration (environment or the starter's gitignored ``.env``):
-``OPENAI_API_KEY`` (required), ``OPENAI_MODEL`` (default ``gpt-4o-mini``),
-``OPENAI_BASE_URL`` (optional). The key is never printed or logged.
+Configuration (environment or the starter's gitignored ``.env``): with
+``ANTHROPIC_API_KEY`` set the model is Claude (``CLAUDE_MODEL``, default
+``claude-sonnet-5-5``; ``CLAUDE_EFFORT``, default ``low``, to fit Pokémon's
+clocks); otherwise ``OPENAI_API_KEY``, ``OPENAI_MODEL`` (default
+``gpt-4o-mini``), ``OPENAI_BASE_URL`` (optional). ``LLM_PROVIDER=openai``
+picks OpenAI with both keys set. Keys are never printed or logged.
 """
 
 from __future__ import annotations

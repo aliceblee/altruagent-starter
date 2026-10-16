@@ -16,8 +16,10 @@ runtime asks for a decision:
   LLM only rewrites the planned chat messages (disable with
   `WEREWOLF_LLM_CHAT=0`). Set `WEREWOLF_DEBUG=1` to log every decision and
   the first private observation.
-- **Any other game** -> `examples.llm_agent.LLMAgent` when `OPENAI_API_KEY`
-  is set, otherwise the first legal action (which can't finish Pokémon or
+- **Any other game** (Pokémon, Red Alert) -> `examples.llm_agent.LLMAgent`
+  on Claude when `ANTHROPIC_API_KEY` is set (`CLAUDE_MODEL`, default
+  `claude-sonnet-5-5`; `CLAUDE_EFFORT`, default `low`), else on OpenAI when
+  `OPENAI_API_KEY` is set, otherwise the first legal action (which can't finish Pokémon or
   Red Alert; see GAMES.md).
 
 **Werewolf safety net.** The router checks every Werewolf decision before
@@ -80,7 +82,7 @@ class Agent:
                     self._delegate = claude_agent_from_env(log=self._note, brain=self._brain)
                 if self._delegate is None:
                     self._delegate = WerewolfAgent(polish=polisher_from_env(), log=self._note)
-            elif os.environ.get("OPENAI_API_KEY"):
+            elif os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("OPENAI_API_KEY"):
                 from examples.llm_agent import create_agent as create_llm_agent
 
                 self._delegate = create_llm_agent()

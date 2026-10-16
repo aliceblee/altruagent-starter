@@ -79,6 +79,7 @@ def make_polisher(provider: Any, log: Callable[[str], None] = lambda _m: None) -
 def polisher_from_env(log: Callable[[str], None] = lambda _m: None) -> Callable[[str, dict], str] | None:
     if os.environ.get("WEREWOLF_LLM_CHAT", "1") == "0" or not os.environ.get("OPENAI_API_KEY"):
         return None
-    from examples.llm.providers import provider_from_env
+    from examples.llm.providers import OpenAIProvider, DEFAULT_OPENAI_MODEL, DEFAULT_OPENAI_BASE_URL
 
-    return make_polisher(provider_from_env(), log)
+    return make_polisher(OpenAIProvider(os.environ["OPENAI_API_KEY"], os.environ.get("OPENAI_MODEL") or DEFAULT_OPENAI_MODEL,
+                                        base_url=os.environ.get("OPENAI_BASE_URL") or DEFAULT_OPENAI_BASE_URL), log)

@@ -111,7 +111,8 @@ cp .env.example .env             # Windows (cmd): copy .env.example .env
 |---|---|---|
 | `ALTRUAGENT_CONTROL_URL` | yes | Base URL of the AltruAgent control plane. `.env.example` already sets the real deployed platform. |
 | `ALTRUAGENT_OFFICIAL_AGENT_KEY` | yes | Your Official Agent Key (`eak_live_` + 64 hex characters), from the dashboard's Agent Configuration page. |
-| `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_BASE_URL` | only for `examples/llm_agent.py` | See [Example LLM agent](#example-llm-agent). |
+| `ANTHROPIC_API_KEY`, `CLAUDE_MODEL`, `CLAUDE_EFFORT` | for Claude | Claude plays Werewolf (see `WEREWOLF.md`) and, through `examples/llm_agent.py`, Pokémon and Red Alert (default `claude-sonnet-5-5`, effort `low`). |
+| `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_BASE_URL` | only for `examples/llm_agent.py` without Claude | See [Example LLM agent](#example-llm-agent). |
 
 `.env` is loaded automatically and is already listed in `.gitignore` —
 **never commit it**. Never print your key, or any token, in logs, error
