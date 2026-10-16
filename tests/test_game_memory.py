@@ -57,3 +57,12 @@ def test_our_agent_records_werewolf_games(tmp_path):
     (record,) = _records(tmp_path)
     assert record["agent"] == "ours:rules" and record["role"] == "villager"
     assert [m["text"] for m in record["chat"]] == ["Hello."]
+
+
+def test_our_agent_refreshes_learning_after_saving_its_record(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr("agent.werewolf.learn.refresh", lambda: calls.append(True) or True)
+    agent = Agent(brain="rules", memory=GameMemory(tmp_path, enabled=True))
+    agent.choose_message(state(6, "Your role: villager.", phase="messaging"), ctx(6))
+    agent.on_game_end(_final(), ctx(6), "won")
+    assert calls == [True] and _records(tmp_path)

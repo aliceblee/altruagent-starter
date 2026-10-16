@@ -986,3 +986,10 @@ def test_seer_mildly_accuses_its_night1_wolf_once_the_wolf_pushes_someone():
 def test_seer_stays_quiet_about_its_wolf_while_the_wolf_says_nothing_suspicious():
     agent, texts, vote = _seer_day1_texts(SEER_FOUND_WOLF, [(4, "Hello everyone, any leads?")])
     assert not any("Player4" in t for t in texts) and vote == "4"
+
+
+def test_curly_apostrophes_read_like_straight_ones():
+    # OpenAI models write "I’m": the parser missed their seer claims until this was normalised.
+    facts = ChatFacts()
+    read_message(facts, 1, "I’m the Seer, counterclaiming Player6. I checked Player6: wolf.", [], 2, 0, RESOLVER)
+    assert facts.seer_claims == {1: 2} and facts.claimed_results[1] == {6: "wolf"}

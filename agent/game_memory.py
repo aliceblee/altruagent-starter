@@ -46,6 +46,10 @@ class GameMemory:
         self._private: dict[str, Any] = {}
         self._written = False
 
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
     def observe(self, state: GameState, context: DecisionContext) -> None:
         """Call on every decision: keeps every chat message (ours included) and what we know privately."""
         if not self._enabled:

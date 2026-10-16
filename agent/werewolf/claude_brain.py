@@ -48,7 +48,7 @@ from typing import Any, Callable
 from altruagent import TERMINATE_MESSAGING, DecisionContext, GameState, SendMessage
 
 from .agent import DAY1_OPENERS, MAX_CHATS_PER_DAY, MAX_WORDS, SEER_ALLY_LINE, WerewolfAgent
-from .parsing import SEER, WOLF, _SEER_CLAIM, snapshot
+from .parsing import SEER, WOLF, _SEER_CLAIM, plain_quotes, snapshot
 
 DEFAULT_MODEL = "claude-opus-5-5"
 MAX_TOKENS = 8000
@@ -60,6 +60,9 @@ SERVER_MAX_CHATS = 5  # the server's limit; past our own MAX_CHATS_PER_DAY only 
 NOTES_LIMIT = 1500
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 PLAYBOOK = Path(__file__).with_name("playbook.md")
+# Patterns learned from past games (agent/werewolf/learn.py writes it; WEREWOLF_LEARNED=0 leaves it out).
+LEARNED = Path(__file__).with_name("learned.md")
+LEARNED_LIMIT = 2500
 CORRECTED = "said something you said was wrong"
 # A claim that a player hasn't spoken. Our view of the chat can be seconds behind (a message may land
 # while Claude is thinking), so such claims are often false, and other agents pounce on them.
@@ -111,6 +114,7 @@ class ClaudeWerewolfAgent:
         chat_effort: str = "medium",
         advisor: WerewolfAgent | None = None,
         playbook: str | None = None,
+        learned: str | None = None,
         log: Callable[[str], None] | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -122,7 +126,10 @@ class ClaudeWerewolfAgent:
         self.advisor = advisor or WerewolfAgent(log=self.log)
         self.advisor.log = self.log
         text = playbook if playbook is not None else (PLAYBOOK.read_text(encoding="utf-8") if PLAYBOOK.exists() else "")
-        self.system = _RULES + ("\n\n" + text.strip() if text.strip() else "")
+        if learned is None:
+            learned = _read_learned()
+        self.system = (_RULES + ("\n\n" + text.strip() if text.strip() else "")
+                       + ("\n\n" + learned.strip()[:LEARNED_LIMIT] if learned.strip() else ""))
         self.clock = clock
         self.notes = ""
         self.transcript: list[dict] = []
@@ -256,11 +263,12 @@ class ClaudeWerewolfAgent:
         text = " ".join(str(answer.get("message") or "").split()[:MAX_WORDS])
         if not text:
             return self._sent(advice, "empty message")
-        if snap.role == SEER and snap.day <= 1 and _SEER_CLAIM.search(text):
+        plain = plain_quotes(text)  # for our checks only; the message goes out as Claude wrote it
+        if snap.role == SEER and snap.day <= 1 and _SEER_CLAIM.search(plain):
             return self._sent(advice, "the seer never claims on day 1")
         if snap.role == SEER and snap.day <= 1 and self._names_hidden_wolf(snap, text):
             return self._sent(advice, "the seer doesn't name its wolf on day 1 before someone else accuses them")
-        if _SILENCE_CLAIM.search(text) and not _ADMISSION.search(text):
+        if _SILENCE_CLAIM.search(plain) and not _ADMISSION.search(plain):
             return self._sent(advice, "it said a player has been silent, which our view of the chat can't confirm")
         to = answer.get("recipient")
         seat = int(to[len("Player"):]) if isinstance(to, str) and to.startswith("Player") else None
@@ -358,7 +366,7 @@ class ClaudeWerewolfAgent:
         if fallback_reason is not None:
             self.log(f"[claude] message: {fallback_reason}; the rule engine's choice: {_describe_message(decision)}")
         if isinstance(decision, SendMessage):
-            votes = [int(a or b) for a, b in _OUR_VOTE.findall(decision.content)]
+            votes = [int(a or b) for a, b in _OUR_VOTE.findall(plain_quotes(decision.content))]
             if votes and not decision.recipients:
                 self._announced[self._chat_day] = votes[-1]
             self._sent_today += 1
@@ -382,7 +390,7 @@ class ClaudeWerewolfAgent:
             to = [("you" if r == me else f"Player{r}") for r in m.recipients]
             self.transcript.append({"day": day, "from": sender, "to": to or "everyone", "text": m.content})
             fresh += m.sender != me
-            if m.sender != me and _corrects(m.content or "", me, private=m.recipients == [me]):
+            if m.sender != me and _corrects(plain_quotes(m.content or ""), me, private=m.recipients == [me]):
                 self._corrections.append((m.sender, day))
         return fresh
 
@@ -488,6 +496,15 @@ def _corrects(text: str, me: int, *, private: bool) -> bool:
         return bool(_CORRECTION.search(text))
     return any(_CORRECTION.search(s) and re.search(rf"\b(?:player\s*|p){me}\b", s, re.I)
                for s in re.split(r"(?<=[.!?;])\s+", text))
+
+
+def _read_learned() -> str:
+    if os.environ.get("WEREWOLF_LEARNED", "1") == "0" or not LEARNED.exists():
+        return ""
+    try:
+        return LEARNED.read_text(encoding="utf-8")
+    except OSError:
+        return ""
 
 
 def _describe_message(decision: Any) -> str:

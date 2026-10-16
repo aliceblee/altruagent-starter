@@ -18,7 +18,7 @@ import os
 import re
 from typing import Any, Callable
 
-from .parsing import _PLAYER_RE, _SEER_CLAIM
+from .parsing import _PLAYER_RE, _SEER_CLAIM, plain_quotes
 
 TIMEOUT_SECONDS = 12.0
 MAX_WORDS = 45
@@ -65,10 +65,10 @@ def make_polisher(provider: Any, log: Callable[[str], None] = lambda _m: None) -
         if isinstance(vote, int) and not re.search(rf"\bplayer\s*{vote}\b", text, re.I):
             log("[werewolf] polish rejected: vote target dropped")
             return draft
-        if _SEER_CLAIM.search(text) and not _SEER_CLAIM.search(draft):
+        if _SEER_CLAIM.search(plain_quotes(text)) and not _SEER_CLAIM.search(plain_quotes(draft)):
             log("[werewolf] polish rejected: invented a seer claim")
             return draft
-        if facts.get("intent") == "seer_claim" and not _SEER_CLAIM.search(text):
+        if facts.get("intent") == "seer_claim" and not _SEER_CLAIM.search(plain_quotes(text)):
             log("[werewolf] polish rejected: dropped the seer claim")
             return draft
         return text

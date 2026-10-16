@@ -162,6 +162,10 @@ class Agent:
         if _is_werewolf(context):
             brain = "claude" if type(self._delegate).__name__ == "ClaudeWerewolfAgent" else "rules"
             self._memory.finish(final_state, context, outcome, agent=f"ours:{brain}")
+            if self._memory.enabled:
+                from agent.werewolf.learn import refresh
+
+                refresh()  # learned.md picks up this game for the next one (never raises)
 
     def _note(self, message: str) -> None:
         """WerewolfAgent's own log lines: printed with WEREWOLF_DEBUG=1, always kept in the decision log."""

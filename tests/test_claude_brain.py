@@ -41,6 +41,7 @@ class FakeClient:
 
 
 def brain(client, **kw):
+    kw.setdefault("learned", "")
     return ClaudeWerewolfAgent(client, advisor=WerewolfAgent(), playbook="PLAYBOOK TEXT", **kw)
 
 
@@ -316,3 +317,20 @@ def test_claude_seer_may_pick_on_its_wolf_once_the_wolf_accuses_someone():
     msg = b.choose_message(chat_state(observation=seer, day=1, messages=talk), ctx(6))
     prompt = client.requests[1]["messages"][0]["content"]
     assert msg.content == poke and "now fair game" in prompt and "they seem off" in prompt
+
+
+def test_claude_seer_cant_claim_on_day1_with_a_curly_apostrophe():
+    seer = "You are Player6. Your role: seer. Night 1: you investigated Player4: villager."
+    client = FakeClient(_send("I’m the Seer and Player4 is clean."))
+    b = brain(client)
+    b.choose_message(chat_state(observation=seer, day=1), ctx(6))  # the opener
+    b.choose_message(chat_state(observation=seer, day=1, messages=[(1, "Hi.")]), ctx(6))  # the ally message
+    msg = b.choose_message(chat_state(observation=seer, day=1, messages=[(1, "Hi."), (2, "Leads?")]), ctx(6))
+    assert not (isinstance(msg, SendMessage) and "Seer" in msg.content)
+
+
+def test_learned_patterns_follow_the_playbook_in_the_instructions(monkeypatch):
+    b = brain(FakeClient(), learned="# Learned from 9 past games\n- A pattern.")
+    assert b.system.index("PLAYBOOK TEXT") < b.system.index("- A pattern.")
+    monkeypatch.setenv("WEREWOLF_LEARNED", "0")
+    assert "Learned from" not in ClaudeWerewolfAgent(FakeClient(), advisor=WerewolfAgent(), playbook="P").system

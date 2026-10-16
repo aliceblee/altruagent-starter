@@ -446,7 +446,18 @@ def _record_push(facts: ChatFacts, sender: int, target: int, day: int, text: str
     facts.pushes.append((sender, target, day, facts.public_messages))
 
 
+_PLAIN_QUOTES = str.maketrans({"\u2019": "'", "\u2018": "'", "\u201b": "'", "\u00b4": "'", "`": "'",
+                                "\u201c": '"', "\u201d": '"', "\u201e": '"'})
+
+
+def plain_quotes(text: str) -> str:
+    """Curly quotes as straight ones, so our patterns read "I’m the Seer" (as OpenAI models write it)
+    the same as "I'm the Seer"."""
+    return text.translate(_PLAIN_QUOTES)
+
+
 def read_message(facts: ChatFacts, sender: int, text: str, recipients: list[int], day: int, me: int, resolver: Resolver) -> None:
+    text = plain_quotes(text)
     facts.message_counts[sender] = facts.message_counts.get(sender, 0) + 1
     if not recipients:
         facts.public_messages += 1
