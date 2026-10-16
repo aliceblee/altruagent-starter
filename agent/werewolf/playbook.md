@@ -46,8 +46,13 @@ and concrete: every line costs tokens on every call.
   lynches. Concentrate votes: announce early, and break near-ties toward the
   player the table is already converging on.
 - Day 1 with no hard information: never name a random suspect, and never
-  invent a reason (no "psychic" picks or "hunches"). Ask for reads, then
-  join the most reasonable accusation and vote with the table.
+  invent a reason (no "psychic" picks or "hunches"). The opener already asks
+  for leads; don't ask again. By your second message, give a tentative read:
+  one player and a concrete reason from what they actually said ("Player2
+  asked for reads twice but gave none"), held lightly, then join the most
+  reasonable accusation and vote with the table. Asking for reads without
+  naming anyone looks evasive at LLM tables: in testing, four players called
+  us passive for it and voted us out on day 1.
 - If two players push the same target in unison, unprompted, call it out:
   wolves coordinate like that.
 - If votes are piling on you, defend yourself calmly and redirect the table

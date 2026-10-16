@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from typing import Any, Protocol
 
 import httpx
@@ -31,6 +32,12 @@ THINKING_DECISIONS = frozenset({"select_lineup", "doubles_turn"})
 # it corrected mid-sentence ("Wait: Chien-Pao is Dark/Ice and would take Earthquake"), with turns
 # taking ~2.5 s of a 40 s budget. CLAUDE_THINKING_EFFORT overrides it.
 THINKING_EFFORT = "medium"
+# ...and the strongest model: on Sonnet, even at medium effort, battle notes still had type
+# mistakes ("Thunderbolt on Garchomp, super effective... no, Garchomp is immune") with turns
+# taking ~2 s of a 40 s budget. CLAUDE_DEEP_MODEL="" keeps them on CLAUDE_MODEL. After a timeout
+# the next DEEP_COOLDOWN_SECONDS of those decisions go back to CLAUDE_MODEL.
+DEFAULT_DEEP_MODEL = "claude-opus-5-5"
+DEEP_COOLDOWN_SECONDS = 120.0
 _EFFORT_ORDER = ("low", "medium", "high", "xhigh", "max")
 CLAUDE_MAX_TOKENS = 16000
 CLAUDE_FALLBACK_BETA = "server-side-fallback-2026-07-01"
@@ -149,7 +156,9 @@ class ClaudeProvider:
         *,
         effort: str = DEFAULT_CLAUDE_EFFORT,
         thinking: str = DEFAULT_CLAUDE_THINKING,
+        deep_model: str | None = DEFAULT_DEEP_MODEL,
         timeout: float = REQUEST_TIMEOUT_SECONDS,
+        clock: Any = time.monotonic,
     ) -> None:
         if client is None:
             import anthropic
@@ -161,6 +170,9 @@ class ClaudeProvider:
         self.model = model
         self.effort = effort
         self._thinking_mode = thinking
+        self.deep_model = deep_model if thinking == "auto" else None
+        self._clock = clock
+        self._deep_off_until = 0.0
         self.thinking_effort = os.environ.get("CLAUDE_THINKING_EFFORT") or THINKING_EFFORT
         self._thinking = _thinking_off(model) if thinking in ("off", "auto") else None
         # Schemas Claude's structured outputs refused as too large (Red Alert's order batches):
@@ -171,7 +183,8 @@ class ClaudeProvider:
         self._use_fallbacks = self._thinking is None and model.startswith(("claude-opus-5", "claude-sonnet-5"))
 
     def __repr__(self) -> str:
-        return f"ClaudeProvider(model={self.model!r}, effort={self.effort!r}, thinking={self._thinking_mode!r})"
+        return (f"ClaudeProvider(model={self.model!r}, deep_model={self.deep_model!r}, effort={self.effort!r}, "
+                f"thinking={self._thinking_mode!r})")
 
     def complete_structured(
         self, messages: list[dict], schema_name: str, schema: dict, *, timeout: float | None = None
@@ -191,8 +204,12 @@ class ClaudeProvider:
         thinks = self._thinking_mode == "on" or (self._thinking_mode == "auto" and schema_name in THINKING_DECISIONS)
         if self._thinking is not None and not thinks:
             request["thinking"] = self._thinking
+        deep = False
         if self._thinking_mode == "auto" and schema_name in THINKING_DECISIONS:
             request["output_config"]["effort"] = _at_least(self.effort, self.thinking_effort)
+            deep = bool(self.deep_model) and self._clock() >= self._deep_off_until
+            if deep:
+                request["model"] = self.deep_model
         if system:
             request["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
         if timeout is not None:
@@ -208,6 +225,8 @@ class ClaudeProvider:
                 _as_plain_json(request, schema)
                 response = self._create(request)
         except Exception as exc:  # noqa: BLE001 - any SDK/network error becomes a ProviderError
+            if deep and type(exc).__name__ == "APITimeoutError":
+                self._deep_off_until = self._clock() + DEEP_COOLDOWN_SECONDS  # too slow: base model for a while
             status = getattr(exc, "status_code", None)
             detail = ""
             if isinstance(status, int) and 400 <= status < 500 and status not in (401, 403):
@@ -364,6 +383,7 @@ def provider_from_env() -> LLMProvider:
             model=os.environ.get("CLAUDE_MODEL") or DEFAULT_CLAUDE_MODEL,
             effort=os.environ.get("CLAUDE_EFFORT") or DEFAULT_CLAUDE_EFFORT,
             thinking=(os.environ.get("CLAUDE_THINKING") or DEFAULT_CLAUDE_THINKING).lower(),
+            deep_model=os.environ.get("CLAUDE_DEEP_MODEL", DEFAULT_DEEP_MODEL) or None,
         )
         if not api_key:
             return claude

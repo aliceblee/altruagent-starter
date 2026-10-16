@@ -9,5 +9,5 @@ def _decision_logs_in_tmp(tmp_path, monkeypatch):
     monkeypatch.setenv("ALTRUAGENT_GAME_MEMORY_DIR", str(tmp_path / "memory"))
     monkeypatch.setenv("WEREWOLF_AUTO_LEARN", "0")
     # A developer's real keys must not change which provider a test gets.
-    for name in ("ANTHROPIC_API_KEY", "LLM_PROVIDER", "CLAUDE_MODEL", "CLAUDE_EFFORT", "WEREWOLF_BRAIN"):
+    for name in ("ANTHROPIC_API_KEY", "LLM_PROVIDER", "CLAUDE_MODEL", "CLAUDE_EFFORT", "CLAUDE_DEEP_MODEL", "CLAUDE_THINKING_EFFORT", "WEREWOLF_BRAIN"):
         monkeypatch.delenv(name, raising=False)

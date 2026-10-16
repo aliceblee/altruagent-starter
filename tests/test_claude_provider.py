@@ -250,3 +250,30 @@ def test_battle_turns_get_medium_effort_draft_picks_stay_low():
     provider.complete_structured(MESSAGES, "doubles_turn", SCHEMA)
     provider.complete_structured(MESSAGES, "choose_action", SCHEMA)
     assert [r["output_config"]["effort"] for r in client.requests] == ["medium", "low"]
+
+
+def test_team_preview_and_battle_turns_use_the_deep_model_until_it_times_out():
+    class APITimeoutError(Exception):
+        pass
+
+    now = [0.0]
+    ok = {"action_id": "a", "n": 0}
+    client = FakeClient(ok, ok, APITimeoutError("slow"), ok, ok)
+    provider = ClaudeProvider(client, "claude-sonnet-5-5", clock=lambda: now[0])
+    provider.complete_structured(MESSAGES, "doubles_turn", SCHEMA)
+    provider.complete_structured(MESSAGES, "choose_action", SCHEMA)  # draft pick: fast model
+    with pytest.raises(ProviderError):
+        provider.complete_structured(MESSAGES, "doubles_turn", SCHEMA)
+    provider.complete_structured(MESSAGES, "doubles_turn", SCHEMA)  # cooling down: base model
+    now[0] += 200
+    provider.complete_structured(MESSAGES, "doubles_turn", SCHEMA)
+    assert [r["model"] for r in client.requests] == [
+        "claude-opus-5-5", "claude-sonnet-5-5", "claude-opus-5-5", "claude-sonnet-5-5", "claude-opus-5-5"]
+    assert "thinking" not in client.requests[0]  # Opus thinks; no Sonnet-only setting sent
+
+
+def test_deep_model_can_be_turned_off(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("CLAUDE_DEEP_MODEL", "")
+    assert provider_from_env().deep_model is None
