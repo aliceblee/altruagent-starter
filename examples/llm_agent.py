@@ -58,6 +58,9 @@ Configuration (environment or the starter's gitignored ``.env``): with
 clocks); otherwise ``OPENAI_API_KEY``, ``OPENAI_MODEL`` (default
 ``gpt-4o-mini``), ``OPENAI_BASE_URL`` (optional). ``LLM_PROVIDER=openai``
 picks OpenAI with both keys set. Keys are never printed or logged.
+
+Strategy: ``examples/llm/playbooks/<game_type>.md`` (Pokémon, Red Alert) is added
+to the model's instructions; edit those files to change how the agent plays.
 """
 
 from __future__ import annotations
@@ -78,6 +81,7 @@ from altruagent import (
     WithReasoning,
 )
 from examples.llm import pokemon, redalert
+from examples.llm.playbooks import playbook
 from examples.llm.base import AdapterFactory, Choice, InvalidChoice, UnsupportedStructuredAction, object_schema
 from examples.llm.providers import LLMProvider, ProviderError, provider_from_env
 
@@ -234,8 +238,9 @@ class LLMAgent:
     # -- shared ---------------------------------------------------------------------
 
     def _ask(self, choice: Choice, state: GameState, context: DecisionContext, *, counter: str):
+        guide = playbook(context.game_type)
         messages = [
-            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "system", "content": _SYSTEM_PROMPT + (f"\n\nSTRATEGY PLAYBOOK\n{guide}" if guide else "")},
             {
                 "role": "user",
                 "content": json.dumps(

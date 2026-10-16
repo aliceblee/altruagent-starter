@@ -17,6 +17,9 @@ Brains (names usable in ``SEATS``):
   when ``ANTHROPIC_API_KEY`` is set, else the rule engine).
 - ``ours_rules`` / ``ours_claude``: the real agent forced onto the rule engine /
   the Claude brain, to compare the two at one table.
+- ``ours_openai`` / ``ours_opus``: the real agent with Pokémon and Red Alert on
+  ``OPENAI_61_MODEL`` / on Claude Opus 5.5 instead of Sonnet (Werewolf unchanged), with
+  the same playbooks: put one against ``ours`` to compare models fairly.
 - ``openai``, ``openai_sol``, ``openai_61``, ``claude``, ``claude_sonnet``, ``gemini``,
   ``deepseek``, ``mistral``: the stock ``examples.llm_agent`` LLMAgent on
   another model. The ``openai*`` ones use ``OPENAI_API_KEY`` directly; the
@@ -68,6 +71,9 @@ SEATS_BY_GAME: dict[str, dict[int, str]] = {
     "red_alert": {0: "ours", 1: "openai_61"},
 }
 UNLISTED_SEAT_OTHER_GAMES = "openai_61"
+# The playbooks in examples/llm/playbooks/ are our strategy. False: LLM opponent seats play
+# without them, like another team's stock agent would.
+OPPONENTS_USE_PLAYBOOKS = False
 WEREWOLF_ONLY_BRAINS = frozenset({"random", "silent", "accuser", "fakeseer", "injector"})
 
 OPENAI_MODEL = "gpt-6-luna"  # cheap OpenAI tier
@@ -228,7 +234,10 @@ def _llm(model: str, key_env: str, base_url: str | None = None, max_tokens: int 
             _log(seat, f"{key_env} is not set; playing 'random' instead of {model}")
             return RandomBrain()
         import examples.llm_agent as llm_agent
+        import examples.llm.playbooks as playbooks
         from examples.llm.providers import DEFAULT_OPENAI_BASE_URL, OpenAIProvider
+
+        playbooks.ENABLED = OPPONENTS_USE_PLAYBOOKS  # each seat is its own process
         from examples.llm_agent import LLMAgent
 
         # Read by LLMAgent at call time; each seat is its own process, so this stays in this seat.
@@ -252,10 +261,11 @@ def _cap_max_tokens(provider: Any, max_tokens: int) -> None:
     provider._http.post = capped
 
 
-def _ours(seat: Any, brain: str | None = None) -> Any:
+def _ours(seat: Any, brain: str | None = None, env: dict[str, str] | None = None) -> Any:
     from agent.agent import Agent
 
     load_dotenv()
+    os.environ.update(env or {})  # this seat's process only
     return Agent(brain=brain)
 
 
@@ -263,6 +273,9 @@ BRAINS: dict[str, Callable[[Any], Any]] = {
     "ours": _ours,
     "ours_rules": lambda seat: _ours(seat, "rules"),
     "ours_claude": lambda seat: _ours(seat, "claude"),
+    "ours_openai": lambda seat: _ours(seat, env={"LLM_PROVIDER": "openai", "OPENAI_MODEL": OPENAI_61_MODEL}),
+    # Opus can't turn thinking off, so its draft picks may run past the 10 s budget (watch for FALLBACK).
+    "ours_opus": lambda seat: _ours(seat, env={"CLAUDE_MODEL": "claude-opus-5-5"}),
     "openai": _llm(OPENAI_MODEL, "OPENAI_API_KEY"),
     "openai_sol": _llm(OPENAI_SOL_MODEL, "OPENAI_API_KEY"),
     "openai_61": _llm(OPENAI_61_MODEL, "OPENAI_API_KEY"),

@@ -43,6 +43,7 @@ from typing import Any, Callable
 from altruagent import WAIT, DecisionContext, GameState, WithReasoning
 
 from .base import object_schema
+from .playbooks import playbook
 from .providers import LLMProvider, ProviderError
 
 # A cost guard sized for a whole 20-minute match at one answer every 0.5 s.
@@ -462,6 +463,7 @@ def build_system_prompt(config: dict[str, Any] | None) -> str:
         f"- Train units (e.g. {INFANTRY} rifle infantry from barracks), keep harvesters working, and "
         "attack-move groups at the enemy base; defend when under_attack events arrive. Costs, power "
         "and build times of what you can build now are in available_production.",
+        *([f"STRATEGY PLAYBOOK (follow it over the build basics above)\n{guide}"] if (guide := playbook("red_alert")) else []),
         "ANSWER\n"
         "orders: the batch to send now, each order in one of the shapes above (an optional field "
         "you don't use is null). An empty list means nothing to do right now.\n"

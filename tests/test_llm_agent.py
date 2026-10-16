@@ -971,3 +971,24 @@ def test_pokemon_single_target_move_without_a_target_gets_it_filled_in():
 
     assert decision.action["slot_1"] == {"type": "move", "move_id": "tailwind", "target": 0}
     assert len(provider.calls) == 1  # no retry needed
+
+
+def test_pokemon_requests_carry_the_playbook(monkeypatch):
+    import examples.llm.playbooks as playbooks
+
+    provider = FakeProvider(_answer(slot_0={"option": 0, "target": 1}, slot_1={"option": 0, "target": 0}))
+    _agent(provider).choose_action(_state(_doubles([_move("tackle", [1, 2])], [_move("tailwind", [0])])), POKEMON)
+    assert "STRATEGY PLAYBOOK" in provider.calls[0]["messages"][0]["content"]
+    assert "Speed control" in provider.calls[0]["messages"][0]["content"]
+
+    monkeypatch.setattr(playbooks, "ENABLED", False)
+    provider = FakeProvider(_answer(slot_0={"option": 0, "target": 1}, slot_1={"option": 0, "target": 0}))
+    _agent(provider).choose_action(_state(_doubles([_move("tackle", [1, 2])], [_move("tailwind", [0])])), POKEMON)
+    assert "STRATEGY PLAYBOOK" not in provider.calls[0]["messages"][0]["content"]
+
+
+def test_red_alert_system_prompt_carries_the_playbook():
+    from examples.llm.redalert import build_system_prompt
+
+    text = build_system_prompt(None)
+    assert "STRATEGY PLAYBOOK" in text and "refinery (proc) right away" in text

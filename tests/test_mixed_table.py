@@ -38,3 +38,16 @@ def test_two_player_games_use_their_own_seat_map_and_pass_structured_moves_throu
     assert seat.choose_action(state, ctx) == {"type": "select_lineup", "lineup": [1, 2, 3, 4]}
     assert seat.name == m.UNLISTED_SEAT_OTHER_GAMES  # "random" only plays Werewolf
     assert made == [1]
+
+
+def test_comparison_seats_set_the_provider_for_their_own_process_only(monkeypatch):
+    import os
+    import examples.mixed_table as m
+
+    built = []
+    monkeypatch.setattr("agent.agent.Agent", lambda brain=None: built.append(dict(os.environ)) or object())
+    monkeypatch.setattr(m, "load_dotenv", lambda: None)
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    monkeypatch.setattr(os, "environ", dict(os.environ))  # keep the test's own environment clean
+    m.BRAINS["ours_openai"](1)
+    assert built[-1]["LLM_PROVIDER"] == "openai" and built[-1]["OPENAI_MODEL"] == m.OPENAI_61_MODEL
