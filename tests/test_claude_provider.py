@@ -331,3 +331,14 @@ def test_router_builds_the_pokemon_agent_on_gpt(monkeypatch):
                               agent_id="a", seat_position=0)
     player = Agent()._player(context)
     assert isinstance(player._provider, FailoverProvider) and player._provider.primary.model == "gpt-6.1-sol"
+
+
+def test_red_alert_never_cancels_the_only_copy_of_a_building():
+    from examples.llm.redalert import drop_requeued_buildings
+
+    state = {"observation": {"production": [{"queue": "Building", "item": "weap", "progress": 0.6},
+                                            {"queue": "Building", "item": "powr", "progress": 0.1},
+                                            {"queue": "Building", "item": "powr", "progress": 0.0}]}}
+    orders = [{"cmd": "cancel", "item": "weap"}, {"cmd": "cancel", "item": "powr"}]
+    kept, dropped = drop_requeued_buildings(orders, state)
+    assert kept == [{"cmd": "cancel", "item": "powr"}] and dropped == 1  # a real duplicate may still go
