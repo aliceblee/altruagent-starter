@@ -311,7 +311,7 @@ def test_the_opener_varies_from_game_to_game():
     openers = {WerewolfAgent(rng=random.Random(i)).choose_message(state(2, "Your role: villager.", phase="messaging"),
                                                                  ctx(2)).content for i in range(20)}
     assert len(openers) >= 3 and openers <= set(DAY1_OPENERS)
-    assert all("seer" in o.lower() for o in DAY1_OPENERS)  # every one invites the seer to speak up
+    assert not any("seer" in o.lower() for o in DAY1_OPENERS)  # never points the wolves at the seer
 
 
 @pytest.mark.parametrize("observation", [

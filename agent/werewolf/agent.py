@@ -44,13 +44,13 @@ STICKY_MARGIN = 0.12
 # other agents may keep notes across games and match our fixed sentences to the roles revealed
 # at death, so no sentence may belong to one role, and no exact sentence should mark our seat.
 # The opener is our first message of day 1. (The old "vegetarian vampire Eddie Cullen" joke got
-# us targeted at LLM tables.) Every phrasing invites the seer to speak up: the village side
-# spares a lone day-1 seer claimant.
+# us targeted at LLM tables.) None of them mentions the seer: asking the seer to speak up on
+# day 1 just points the wolves at it.
 DAY1_OPENERS = (
-    "Hello! No hard info yet, anyone have a lead? Maybe a seer?",
-    "Hi all. Nothing solid to go on yet. Does anyone have a lead, or a seer with a result?",
-    "Morning, everyone. No real info so far. Any leads? A seer with something to share?",
-    "Hey all, nothing concrete yet. Who has a lead? Seer, anything?",
+    "Hello! No hard info yet. Anyone have a lead?",
+    "Hi all. Nothing solid to go on yet. Does anyone have a lead?",
+    "Morning, everyone. No real info so far. Any leads?",
+    "Hey all, nothing concrete yet. Who has a lead?",
 )
 # Day 1 with nothing to go on: ask the table instead of naming anyone.
 DAY1_ASKS = (
@@ -684,7 +684,8 @@ class WerewolfAgent:
 
     def _spared_claimants(self, snap: Snapshot) -> set[int]:
         """A lone seer claimant from day 1, whom the village side never votes for or calls a
-        wolf (team rule: our day-1 opener asks the seer to speak up, so we don't punish it).
+        wolf (team rule: a lone day-1 claim is usually the real seer; fakes tend to come as
+        counterclaims).
         Not when two claimed on day 1 (one is lying), when the revealed roles disprove the
         claim, or when we are the seer (then the claim is certainly fake)."""
         if snap.role in (WOLF, SEER):

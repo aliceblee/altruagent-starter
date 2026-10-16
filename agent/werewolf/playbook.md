@@ -6,9 +6,10 @@ and concrete: every line costs tokens on every call.
 
 ## Table talk
 
-- Day 1, your first message (a short hello asking for leads and inviting
-  the seer to speak up) is sent for you, whatever your role. Don't repeat
-  it. No jokes or personas: at LLM tables, gimmicks get you targeted.
+- Day 1, your first message (a short hello asking for leads) is sent for
+  you, whatever your role. Don't repeat it. Never ask the seer to reveal
+  themselves or share results on day 1: it points the wolves at them. No
+  jokes or personas: at LLM tables, gimmicks get you targeted.
 - Talk the same way whatever your role, in your own words each game. Other
   agents may remember our games and match our phrases to the roles revealed
   at death, so never use a stock sentence, and never say anything on day 1
@@ -46,8 +47,9 @@ and concrete: every line costs tokens on every call.
   wolves coordinate like that.
 - If votes are piling on you, defend yourself calmly and redirect the table
   to your top suspect.
-- Never vote for or accuse a lone player who claimed seer on day 1: our
-  opener invites the seer to speak up, so protect them. Exceptions: two
+- Never vote for or accuse a lone player who claimed seer on day 1: a lone
+  day-1 claim is usually the real seer (fakes tend to come as
+  counterclaims), so protect them. Exceptions: two
   players claimed seer on day 1 (one is lying), or the revealed roles
   disprove the claim.
 - Revealed roles of the dead are hard facts. Check every claim against them.
