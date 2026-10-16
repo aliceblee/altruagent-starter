@@ -130,7 +130,7 @@ def test_router_logs_our_moves_and_outcome_in_other_games(tmp_path, monkeypatch)
     ("claude-haiku-5-5", {"type": "disabled"}),
     ("claude-opus-5-5", None),  # can't be turned off: effort controls it
 ])
-def test_thinking_is_off_by_default_and_server_fallbacks_are_skipped(model, thinking):
+def test_thinking_is_off_by_default_for_quick_decisions_and_server_fallbacks_are_skipped(model, thinking):
     client = FakeClient({"action_id": "a", "n": 0}, fallbacks_ok=False)  # a beta call would raise
     ClaudeProvider(client, model).complete_structured(MESSAGES, "x", SCHEMA)
     assert client.requests[0].get("thinking") == thinking
@@ -209,3 +209,25 @@ def test_with_both_keys_other_games_fail_over_to_openai(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     provider = provider_from_env()
     assert isinstance(provider, FailoverProvider) and isinstance(provider.primary, ClaudeProvider)
+
+
+def test_too_large_grammar_falls_back_to_plain_json_and_remembers():
+    err = Exception("Error code: 400 - The compiled grammar is too large, which would cause performance issues")
+    err.status_code = 400
+    fenced = SimpleNamespace(stop_reason="end_turn",
+                             content=[SimpleNamespace(type="text", text='```json\n{"orders": []}\n```')])
+    client = FakeClient(err, fenced, {"orders": [1]})
+    provider = ClaudeProvider(client, "claude-sonnet-5-5")
+    assert provider.complete_structured(MESSAGES, "red_alert_orders", SCHEMA) == {"orders": []}
+    assert provider.complete_structured(MESSAGES, "red_alert_orders", SCHEMA) == {"orders": [1]}
+    retry, later = client.requests[1], client.requests[2]
+    for req in (retry, later):
+        assert "format" not in req["output_config"] and "JSON schema" in req["messages"][-1]["content"]
+
+
+def test_auto_thinking_is_on_for_team_preview_and_battle_turns():
+    client = FakeClient({"action_id": "a", "n": 0}, {"action_id": "a", "n": 0}, {"action_id": "a", "n": 0})
+    provider = ClaudeProvider(client, "claude-sonnet-5-5")
+    for name in ("select_lineup", "doubles_turn", "choose_action"):
+        provider.complete_structured(MESSAGES, name, SCHEMA)
+    assert [r.get("thinking") for r in client.requests] == [None, None, {"type": "between_tools"}]

@@ -961,3 +961,13 @@ def test_the_real_openai_provider_is_given_the_pokemon_timeout():
 
     assert seen[0] <= llm_agent.POKEMON_REQUEST_SECONDS
     assert seen[1] == providers.REQUEST_TIMEOUT_SECONDS
+
+
+def test_pokemon_single_target_move_without_a_target_gets_it_filled_in():
+    # Test games 2026-10-16: Claude sent target None for Protect/Tailwind whose only legal target is 0.
+    provider = FakeProvider(_answer(slot_0={"option": 0, "target": 1}, slot_1={"option": 0, "target": None}))
+
+    decision = _agent(provider).choose_action(_state(_doubles([_move("tackle", [1, 2])], [_move("tailwind", [0])])), POKEMON)
+
+    assert decision.action["slot_1"] == {"type": "move", "move_id": "tailwind", "target": 0}
+    assert len(provider.calls) == 1  # no retry needed

@@ -22,9 +22,11 @@ DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
 # want a fast model; Werewolf has its own Claude brain (agent/werewolf/claude_brain.py).
 DEFAULT_CLAUDE_MODEL = "claude-sonnet-5-5"
 DEFAULT_CLAUDE_EFFORT = "low"
-# Thinking off by default: with it on, Sonnet 5.5 took 11-14 s per Pokémon draft pick in
-# testing, past our 10 s budget (the server allows 15), so most picks fell back.
-DEFAULT_CLAUDE_THINKING = "off"
+# "auto": thinking off where the clock is tight (Pokémon draft picks: with it on, Sonnet 5.5
+# took 11-14 s, past our 10 s budget; Red Alert is real time), on for decisions with time to
+# spare (Pokémon team preview: 90 s; battle turns: 55 s, which took ~2.5 s with it off).
+DEFAULT_CLAUDE_THINKING = "auto"
+THINKING_DECISIONS = frozenset({"select_lineup", "doubles_turn"})
 CLAUDE_MAX_TOKENS = 16000
 CLAUDE_FALLBACK_BETA = "server-side-fallback-2026-07-01"
 # Keywords Claude's structured outputs don't accept; the adapters' own validation
@@ -146,13 +148,17 @@ class ClaudeProvider:
         self._client = client
         self.model = model
         self.effort = effort
-        self._thinking = _thinking_off(model) if thinking == "off" else None
+        self._thinking_mode = thinking
+        self._thinking = _thinking_off(model) if thinking in ("off", "auto") else None
+        # Schemas Claude's structured outputs refused as too large (Red Alert's order batches):
+        # asked for as plain JSON instead, with the schema in the prompt.
+        self._unstructured: set[str] = set()
         # Server-side fallbacks re-run the same request on another model, which would reject a
         # model-specific "thinking off" setting; Pokémon and Red Alert rarely trigger refusals.
         self._use_fallbacks = self._thinking is None and model.startswith(("claude-opus-5", "claude-sonnet-5"))
 
     def __repr__(self) -> str:
-        return f"ClaudeProvider(model={self.model!r}, effort={self.effort!r}, thinking={'off' if self._thinking else 'on'})"
+        return f"ClaudeProvider(model={self.model!r}, effort={self.effort!r}, thinking={self._thinking_mode!r})"
 
     def complete_structured(
         self, messages: list[dict], schema_name: str, schema: dict, *, timeout: float | None = None
@@ -167,14 +173,25 @@ class ClaudeProvider:
             "output_config": {"effort": self.effort,
                               "format": {"type": "json_schema", "schema": _claude_schema(schema)}},
         }
-        if self._thinking is not None:
+        if schema_name in self._unstructured:
+            _as_plain_json(request, schema)
+        thinks = self._thinking_mode == "on" or (self._thinking_mode == "auto" and schema_name in THINKING_DECISIONS)
+        if self._thinking is not None and not thinks:
             request["thinking"] = self._thinking
         if system:
             request["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
         if timeout is not None:
             request["timeout"] = timeout
         try:
-            response = self._create(request)
+            try:
+                response = self._create(request)
+            except Exception as exc:  # noqa: BLE001
+                if getattr(exc, "status_code", None) != 400 or "grammar is too large" not in str(exc) \
+                        or schema_name in self._unstructured:
+                    raise
+                self._unstructured.add(schema_name)
+                _as_plain_json(request, schema)
+                response = self._create(request)
         except Exception as exc:  # noqa: BLE001 - any SDK/network error becomes a ProviderError
             status = getattr(exc, "status_code", None)
             detail = ""
@@ -193,7 +210,13 @@ class ClaudeProvider:
         try:
             data = json.loads(text)
         except ValueError:
-            raise ProviderError("the model's reply was not valid JSON") from None
+            start, end = text.find("{"), text.rfind("}")  # plain-JSON mode: tolerate fences or a preamble
+            try:
+                data = json.loads(text[start:end + 1]) if 0 <= start < end else None
+            except ValueError:
+                data = None
+            if data is None:
+                raise ProviderError("the model's reply was not valid JSON") from None
         if not isinstance(data, dict):
             raise ProviderError("the model's reply was not a JSON object")
         return data
@@ -259,6 +282,15 @@ class FailoverProvider:
                 else:
                     self._log(f"[llm] Claude unreachable ({exc}); this call goes to {self.backup.model}")
         return self.backup.complete_structured(messages, schema_name, schema, timeout=timeout)
+
+
+def _as_plain_json(request: dict, schema: dict) -> None:
+    """Drop structured outputs from ``request`` and ask for the same JSON in words instead.
+    The callers validate every answer themselves (InvalidChoice / their own order checks)."""
+    request["output_config"] = {"effort": request["output_config"]["effort"]}
+    note = ("Answer with only one JSON object, no other text and no code fences, matching this JSON "
+            f"schema: {json.dumps(schema, separators=(',', ':'))}")
+    request["messages"] = request["messages"] + [{"role": "user", "content": note}]
 
 
 def _thinking_off(model: str) -> dict | None:

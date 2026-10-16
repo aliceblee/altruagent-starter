@@ -112,6 +112,8 @@ def doubles_choice(action: LegalAction, state: GameState) -> Choice:
         choice = {"type": "move", "move_id": option["move_id"]}
         targets = option.get("targets") or []
         if targets:
+            if len(targets) == 1 and (target is None or isinstance(target, bool)):
+                target = targets[0]  # a self/ally-only move (Protect, Tailwind): models often leave it empty
             if isinstance(target, bool) or target not in targets:
                 raise InvalidChoice(
                     f"slot_{number}: target {target!r} is not legal for {option['move_id']}; choose one of {targets}"
