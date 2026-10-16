@@ -13,3 +13,28 @@ def test_dummy_seats_get_their_own_team_names_everywhere():
     assert seat_teams(s.raw)[0] == "alime588" and seat_teams(s.raw)[3] == "Test-claude"
     snap, _ = snapshot(s, 0)
     assert [(v.voter, v.target) for v in snap.votes] == [(3, 4)] and snap.dead[4].cause == "vote"
+
+
+def test_two_player_games_use_their_own_seat_map_and_pass_structured_moves_through(monkeypatch):
+    import examples.mixed_table as m
+    from altruagent import DecisionContext, WAIT
+    from altruagent.models import GameState
+
+    made = []
+
+    class Echo:
+        def __init__(self, seat):
+            made.append(seat)
+
+        def choose_action(self, state, context):
+            return {"type": "select_lineup", "lineup": [1, 2, 3, 4]}  # a structured payload, not a LegalAction
+
+    monkeypatch.setattr(m, "SEATS_BY_GAME", {"pokemon_vgc_doubles_draft": {0: "ours", 1: "random"}})
+    brains = {"ours": lambda seat: Echo(seat), m.UNLISTED_SEAT_OTHER_GAMES: lambda seat: Echo(seat)}
+    state = GameState.from_mcp_state({"session_id": "p", "game_type": "pokemon_vgc_doubles_draft", "phase": "moving",
+                                      "your_position": 1, "players": []})
+    seat = m.Mixed(brains=brains)
+    ctx = DecisionContext(session_id="p", tournament_id=None, game_type="pokemon_vgc_doubles_draft", agent_id="a", seat_position=1)
+    assert seat.choose_action(state, ctx) == {"type": "select_lineup", "lineup": [1, 2, 3, 4]}
+    assert seat.name == m.UNLISTED_SEAT_OTHER_GAMES  # "random" only plays Werewolf
+    assert made == [1]

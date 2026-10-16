@@ -1,4 +1,7 @@
-"""Test-only mixed Werewolf table: our real agent against dummies and other LLMs.
+"""Test-only mixed table: our real agent against dummies and other LLMs.
+
+Werewolf uses ``SEATS``; Pokémon and Red Alert (2 players) use their own map in
+``SEATS_BY_GAME``, so one running process serves test matches of all three.
 
     python -m agent --match --agent examples.mixed_table
 
@@ -43,7 +46,7 @@ from typing import Any, Callable
 
 from dotenv import load_dotenv
 
-from altruagent import TERMINATE_MESSAGING, DecisionContext, GameState, LegalAction, SendMessage, WithReasoning
+from altruagent import TERMINATE_MESSAGING, WAIT, DecisionContext, GameState, LegalAction, SendMessage, WithReasoning
 
 # -- edit me ---------------------------------------------------------------------------------
 
@@ -57,6 +60,15 @@ SEATS: dict[int, str] = {
     6: "openai_sol",
 }
 UNLISTED_SEAT = "random"  # any seat missing from SEATS
+
+# Two-player games: seat 0 / seat 1. Only "ours*" and the LLM brains play these;
+# the Werewolf dummies (random, silent, accuser, ...) don't.
+SEATS_BY_GAME: dict[str, dict[int, str]] = {
+    "pokemon_vgc_doubles_draft": {0: "ours", 1: "openai_61"},
+    "red_alert": {0: "ours", 1: "openai_61"},
+}
+UNLISTED_SEAT_OTHER_GAMES = "openai_61"
+WEREWOLF_ONLY_BRAINS = frozenset({"random", "silent", "accuser", "fakeseer", "injector"})
 
 OPENAI_MODEL = "gpt-6-luna"  # cheap OpenAI tier
 OPENAI_SOL_MODEL = "gpt-6-sol"  # stronger OpenAI tier
@@ -306,6 +318,23 @@ class Mixed:
     def _inner(self, context: DecisionContext) -> Any:
         if self._brain is None:
             seat = context.seat_position
+            if not _is_werewolf(context):
+                seats = SEATS_BY_GAME.get(context.game_type or "", {})
+                self.name = seats.get(seat, UNLISTED_SEAT_OTHER_GAMES) if isinstance(seat, int) else UNLISTED_SEAT_OTHER_GAMES
+                if self.name in WEREWOLF_ONLY_BRAINS:
+                    _log(seat, f"{self.name!r} only plays Werewolf; using {UNLISTED_SEAT_OTHER_GAMES!r}")
+                    self.name = UNLISTED_SEAT_OTHER_GAMES
+                self._brain = self._brains[self.name](seat)
+                _log(seat, f"playing {context.game_type} as {self.name}")
+                if not self.name.startswith("ours"):
+                    try:
+                        from agent.decision_log import DecisionLog
+
+                        self._record = DecisionLog()
+                        self._write(context, "note", text=f"[mixed] seat{seat} playing as {self.name}")
+                    except Exception as exc:  # noqa: BLE001 - logging must never cost the seat
+                        _log(seat, f"decision log unavailable: {exc!r}")
+                return self._brain
             self.name = self._seats.get(seat, UNLISTED_SEAT) if isinstance(seat, int) else UNLISTED_SEAT
             try:
                 self._brain = self._brains[self.name](seat)
@@ -360,6 +389,15 @@ class Mixed:
 
     def choose_action(self, state: GameState, context: DecisionContext):
         brain = self._inner(context)
+        if not _is_werewolf(context):
+            # Structured moves (Pokémon team/turn payloads, Red Alert order batches, WAIT) go
+            # through as they are: LLMAgent validates them and has its own fallbacks, and the
+            # Werewolf safety net below would reject anything that isn't a plain legal action.
+            decision = brain.choose_action(state, context)
+            if decision is not WAIT:
+                self._write(context, "action", phase=state.phase, decision=repr(decision)[:500],
+                            reasoning=getattr(decision, "reasoning_summary", None))
+            return decision
         self._relabel(state)
         self._hear(state, context)
         decision, problem = None, None
@@ -384,6 +422,9 @@ class Mixed:
 
     def choose_message(self, state: GameState, context: DecisionContext):
         brain = self._inner(context)
+        if not _is_werewolf(context):
+            method = getattr(brain, "choose_message", None)
+            return method(state, context) if method is not None else TERMINATE_MESSAGING
         self._relabel(state)
         self._hear(state, context)
         method = getattr(brain, "choose_message", None)
@@ -430,6 +471,10 @@ class Mixed:
                 self._memory.finish(final_state, context, outcome, agent=self.name or UNLISTED_SEAT)
         except Exception as exc:  # noqa: BLE001
             _log(context.seat_position, f"{self.name} on_game_end failed: {type(exc).__name__}: {exc}")
+
+
+def _is_werewolf(context: DecisionContext) -> bool:
+    return (context.game_type or "").startswith("werewolf")
 
 
 def _renamed(value: Any, renames: dict[str, str]) -> Any:
