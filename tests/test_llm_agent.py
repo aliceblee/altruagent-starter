@@ -973,8 +973,14 @@ def test_pokemon_single_target_move_without_a_target_gets_it_filled_in():
     assert len(provider.calls) == 1  # no retry needed
 
 
-def test_pokemon_requests_carry_the_playbook(monkeypatch):
+def test_pokemon_requests_carry_the_playbook_only_when_switched_on(monkeypatch):
     import examples.llm.playbooks as playbooks
+
+    provider = FakeProvider(_answer(slot_0={"option": 0, "target": 1}, slot_1={"option": 0, "target": 0}))
+    _agent(provider).choose_action(_state(_doubles([_move("tackle", [1, 2])], [_move("tailwind", [0])])), POKEMON)
+    assert "STRATEGY PLAYBOOK" not in provider.calls[0]["messages"][0]["content"]  # off by default
+
+    monkeypatch.setenv("POKEMON_PLAYBOOK", "on")
 
     provider = FakeProvider(_answer(slot_0={"option": 0, "target": 1}, slot_1={"option": 0, "target": 0}))
     _agent(provider).choose_action(_state(_doubles([_move("tackle", [1, 2])], [_move("tailwind", [0])])), POKEMON)
