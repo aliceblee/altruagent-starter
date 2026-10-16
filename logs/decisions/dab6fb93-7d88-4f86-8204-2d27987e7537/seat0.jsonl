@@ -1,0 +1,8 @@
+{"time": 1792132043.876, "kind": "note", "seat": 0, "text": "[llm] red_alert: FALLBACK (error), nothing sent: Claude request failed (APIConnectionError); no model call for 5 s"}
+{"time": 1792132044.179, "kind": "note", "seat": 0, "text": "[llm] red_alert: FALLBACK (backoff), nothing sent"}
+{"time": 1792132050.137, "kind": "note", "seat": 0, "text": "[llm] red_alert: FALLBACK (error), nothing sent: Claude request failed (APIConnectionError); no model call for 10 s"}
+{"time": 1792132061.144, "kind": "note", "seat": 0, "text": "[llm] red_alert: FALLBACK (error), nothing sent: Claude request failed (APIConnectionError); no model call for 20 s"}
+{"time": 1792132083.001, "kind": "note", "seat": 0, "text": "[llm] red_alert: FALLBACK (error), nothing sent: Claude request failed (APIConnectionError); no model call for 40 s"}
+{"time": 1792132123.99, "kind": "note", "seat": 0, "text": "[llm] red_alert: FALLBACK (error), nothing sent: Claude request failed (APIConnectionError); no model call for 60 s"}
+{"time": 1792132185.204, "kind": "note", "seat": 0, "text": "[llm] red_alert: FALLBACK (error), nothing sent: Claude request failed (APIConnectionError); no model call for 60 s"}
+{"time": 1792132197.793, "kind": "game_end", "seat": 0, "game_type": "red_alert", "outcome": "lost"}
