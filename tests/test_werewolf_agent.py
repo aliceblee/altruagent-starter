@@ -993,3 +993,22 @@ def test_curly_apostrophes_read_like_straight_ones():
     facts = ChatFacts()
     read_message(facts, 1, "I’m the Seer, counterclaiming Player6. I checked Player6: wolf.", [], 2, 0, RESOLVER)
     assert facts.seer_claims == {1: 2} and facts.claimed_results[1] == {6: "wolf"}
+
+
+@pytest.mark.parametrize("text", [
+    "Let's be careful on Day 1 with no info. I'd suggest we avoid a random vote on Player0 and instead hear everyone's thoughts first.",
+    "Player5, why specifically mention avoiding a vote on Player0 when nobody had proposed one?",
+    "Rather than voting Player0, let's hear from the quiet ones.",
+])
+def test_talking_about_a_vote_is_not_a_vote(text):
+    # Live game 1772d57c: both lines were read as votes on Player0, who then "denied" being a wolf
+    # to two players defending it, and was voted out on day 1.
+    facts = ChatFacts()
+    read_message(facts, 5, text, [], 1, 6, RESOLVER)
+    assert facts.intents_on(1) == {} and (5, 0, 1) not in facts.accusations
+
+
+def test_real_votes_still_count():
+    facts = ChatFacts()
+    read_message(facts, 5, "I'm voting Player0.", [], 1, 6, RESOLVER)
+    assert facts.intents_on(1) == {5: 0}
